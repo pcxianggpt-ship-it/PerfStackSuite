@@ -192,7 +192,12 @@ PerfStackSuite/
 │   ├── prometheus-2.XX.linux-amd64.tar.gz
 │   ├── grafana-XX.XX.linux-amd64.tar.gz
 │   ├── influxdb-XX.XX.x86_64.tar.gz
-│   └── node_exporter-1.XX.linux-amd64.tar.gz
+│   ├── node_exporter-1.XX.linux-amd64.tar.gz
+│   └── fonts/                 # 中文字体文件目录（解决 JMeter GUI 乱码）
+│       ├── wqy-zenhei.ttc     # 文泉驿正黑字体
+│       ├── wqy-microhei.ttc   # 文泉驿微米黑字体
+│       ├── NotoSansCJK-Regular.ttc  # Google Noto 字体
+│       └── README.md          # 字体说明文档
 ├── scripts/                   # 部署脚本目录
 │   ├── install.sh             # 主安装脚本
 │   ├── install_prometheus.sh  # Prometheus 安装脚本
@@ -202,14 +207,24 @@ PerfStackSuite/
 │   ├── install_jdk.sh         # JDK 安装脚本
 │   ├── install_jmeter.sh      # JMeter 安装脚本
 │   ├── install_sysctl.sh      # 系统内核参数优化脚本
-│   ├── config_ssh.sh          # SSH 配置脚本
-│   └── common.sh              # 公共函数库
+│   ├── config_ssh.sh          # SSH 配置脚本（包含字体安装功能）
+│   └── common.sh              # 公共函数库（包含字体管理函数）
 ├── config/                    # 配置文件目录
 │   ├── prometheus.yml         # Prometheus 配置
+│   ├── grafana.ini            # Grafana 配置文件模板
 │   ├── grafana-datasource.yml # Grafana 数据源配置
-│   └── deploy.conf            # 部署配置文件
+│   ├── influxdb.conf          # InfluxDB 配置文件模板
+│   ├── deploy.conf            # 部署配置文件
+│   └── dashboards/            # Grafana 监控面板模板
+│       ├── node-exporter-dashboard.json
+│       ├── prometheus-dashboard.json
+│       └── jmeter-dashboard.json
 └── docs/                      # 文档目录
-    └── requirement.md         # 需求文档
+    ├── requirement.md         # 需求文档
+    ├── development-plan.md    # 开发计划
+    ├── user-guide.md          # 用户使用手册
+    ├── deployment-guide.md    # 部署操作手册
+    └── faq.md                 # 常见问题 FAQ
 ```
 
 ## 交付物
@@ -219,10 +234,17 @@ PerfStackSuite/
 3. 部署和操作文档
 4. 监控面板模板（Grafana JSON）
 5. JMeter 测试计划示例
+6. 中文字体包（soft/fonts/）
+   - 文泉驿正黑字体
+   - 文泉驿微米黑字体
+   - Google Noto CJK 字体
+   - 字体说明文档
 
 ## 离线安装包准备
 
 部署前需将以下安装包放置在 `soft/` 目录：
+
+### 软件安装包
 
 | 组件 | 文件名示例 | 下载地址 |
 |------|-----------|---------|
@@ -232,6 +254,23 @@ PerfStackSuite/
 | Grafana | grafana-XX.XX.linux-amd64.tar.gz | https://grafana.com/grafana/download |
 | InfluxDB | influxdb-XX.XX.x86_64.tar.gz | https://portal.influxdata.com/downloads/ |
 | Node Exporter | node_exporter-1.XX.linux-amd64.tar.gz | https://prometheus.io/download/#node_exporter |
+
+### 中文字体包（可选，解决 JMeter GUI 乱码）
+
+放置在 `soft/fonts/` 目录：
+
+| 字体名称 | 文件名 | 说明 | 下载地址 |
+|---------|--------|------|---------|
+| 文泉驿正黑 | wqy-zenhei.ttc | 开源中文字体，覆盖全面 | https://github.com/adobe-fonts/source-han-sans |
+| 文泉驿微米黑 | wqy-microhei.ttc | 现代无衬线字体 | https://github.com/adobe-fonts/source-han-sans |
+| Google Noto CJK | NotoSansCJK-Regular.ttc | Google 开源字体 | https://fonts.google.com/noto |
+
+**字体获取方式**：
+1. 从系统字体库复制（如 CentOS：`/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc`）
+2. 从官方网站下载
+3. 从字体项目 GitHub 仓库下载
+
+**注意**：字体文件为可选，如果系统已安装中文字体包可跳过
 
 ---
 
@@ -578,7 +617,7 @@ PerfStackSuite/
 
 ### 9. config_ssh.sh（SSH 配置脚本）
 
-**功能说明：** 配置 SSH 服务和 X11 Forwarding，支持 JMeter GUI 远程显示。
+**功能说明：** 配置 SSH 服务和 X11 Forwarding，支持 JMeter GUI 远程显示，并安装中文字体解决 JMeter 界面乱码问题。
 
 **操作步骤：**
 
@@ -599,13 +638,37 @@ PerfStackSuite/
 5. 安装 X11 依赖库：
    - CentOS：yum install -y xauth xorg-x11-fonts-* libX11 libXext libXtst
    - Ubuntu：apt-get install -y xauth x11-apps libx11-6 libxext6 libxtst6
-6. 配置防火墙：
+
+**中文字体安装（解决 JMeter GUI 乱码）：**
+6. 检测系统已安装字体：执行 `fc-list :lang=zh`
+7. 安装中文字体包：
+   - CentOS/麒麟 V10：
+     - yum install -y fonts-chinese
+     - yum install -y fonts-wqy-zenhei fonts-wqy-microhei
+     - 可选：yum install -y fonts-arphic-uming fonts-arphic-ukai
+   - Ubuntu：
+     - apt-get install -y fonts-wqy-zenhei fonts-wqy-microhei
+     - apt-get install -y fonts-noto-cjk
+     - 可选：apt-get install -y fonts-arphic-uming fonts-arphic-ukai
+8. 安装自定义字体文件（如 soft/fonts/ 目录存在）：
+   - 创建字体缓存目录：
+     - CentOS：`/usr/share/fonts/chinese`
+     - Ubuntu：`/usr/share/fonts/truetype/chinese`
+   - 复制字体文件到字体目录
+   - 设置字体权限：`chmod 644`
+   - 更新字体缓存：`fc-cache -fv`
+   - 验证字体安装：`fc-list :lang=zh`
+9. 配置 JMeter 字体参数：
+   - 编辑 JMeter 启动脚本：`/opt/jmeter/current/bin/jmeter`
+   - 添加 JVM 参数：`-Dfile.encoding=UTF-8`
+   - 可选：指定默认字体：`-Dswing.defaultfont=SansSerif`
+10. 防火墙配置：
    - 开放 SSH 端口（默认 22）
    - CentOS：firewall-cmd --permanent --add-service=ssh
    - Ubuntu：ufw allow ssh
-7. 重启 SSH 服务使配置生效：
+11. 重启 SSH 服务使配置生效：
    - systemctl restart sshd 或 systemctl restart ssh
-8. 显示 X11 Forwarding 配置状态：
+12. 显示 X11 Forwarding 配置状态：
    - 执行 grep 查看配置是否生效
 
 **SSH 密钥配置（可选）：**
@@ -624,12 +687,18 @@ PerfStackSuite/
 **验证测试：**
 1. 显示当前 SSH 配置摘要
 2. 显示 X11 Forwarding 状态
-3. 提供测试命令示例：
+3. 验证字体安装：
+   - 执行 `fc-list :lang=zh` 查看中文字体
+   - 检查是否包含 WenQuanYi 或 Noto 字体
+4. 提供测试命令示例：
    - 本地使用 XShell 等工具连接时需启用 X11 转发
    - 测试命令：xclock（应显示图形界面）
-4. 显示 JMeter GUI 启动方式：
-   - `ssh -X user@server`
-   - 连接后执行 `jmeter` 启动 GUI
+5. JMeter GUI 字体显示验证：
+   - 通过 SSH X11 Forwarding 连接：`ssh -X user@server`
+   - 启动 JMeter GUI：`jmeter`
+   - 创建测试计划并添加中文命名的元素
+   - 检查界面中文是否正常显示，无乱码
+6. 输出测试结果和字体配置信息
 
 ---
 
@@ -684,6 +753,14 @@ PerfStackSuite/
 - `get_local_ip`：获取本机 IP 地址
 - `check_port`：检查端口是否被占用
 - `wait_for_port`：等待端口监听
+
+**字体管理函数：**
+- `check_font`：检查字体是否已安装（接受字体名称参数）
+- `install_font_package`：安装系统字体包（根据 OS 类型选择包管理器）
+- `install_font_files`：从 soft/fonts/ 目录安装字体文件到系统字体目录
+- `update_font_cache`：更新字体缓存（执行 fc-cache -fv）
+- `verify_font_installation`：验证字体安装（使用 fc-list :lang=zh 检查）
+- `install_chinese_fonts`：完整的中文安装流程（组合上述函数）
 
 **配置文件处理函数：**
 - `load_config`：加载配置文件（读取 deploy.conf）
