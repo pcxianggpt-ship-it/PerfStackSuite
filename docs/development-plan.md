@@ -15,16 +15,7 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，使�
 
 ### 阶段 1：项目准备与环境搭建（第 1 周）
 
-#### 1.1 开发环境配置
-- [ ] 搭建测试虚拟机
-  - [ ] CentOS 7 虚拟机
-  - [ ] Ubuntu 18.04 虚拟机
-  - [ ] 麟麟 V10 虚拟机（如条件允许）
-- [ ] 安装必要开发工具（vim、git、dos2unix）
-- [ ] 配置 Git 仓库（.gitignore、分支策略）
-- [ ] 准备离线安装包下载清单
-
-#### 1.2 基础架构设计
+#### 1.1 基础架构设计
 - [ ] 创建目录结构（soft/、scripts/、config/、docs/、soft/fonts/）
 - [ ] 编写 common.sh 公共函数库框架
   - 日志函数（log_info、log_warn、log_error、log_success）
@@ -32,12 +23,7 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，使�
     - 支持 CentOS/Ubuntu/Debian/麒麟 V10 检测
     - 麒麟 V10 基于 CentOS，需要特殊识别逻辑
   - 基础工具函数（backup_file、create_dir）
-  - **字体管理函数（新增）**
-    - [ ] `check_font`：检查字体是否已安装
-    - [ ] `install_font_package`：安装系统字体包
-    - [ ] `install_font_files`：从 soft/fonts/ 安装字体文件
-    - [ ] `update_font_cache`：更新字体缓存（fc-cache）
-    - [ ] `verify_font_installation`：验证字体安装（fc-list）
+  - 字体管理函数（详见需求文档）
 - [ ] 创建 deploy.conf 配置文件模板
 - [ ] 编写 install.sh 主脚本框架
 

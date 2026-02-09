@@ -36,10 +36,13 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
 
 #### 1.4 Node Exporter 部署
 - 离线安装，从 `soft/` 目录读取安装包
-- 在目标服务器上部署 Node Exporter
+- 支持本地安装和远程分布式部署
+- 通过 SSH/SCP 自动分发到多台目标服务器
+- 支持批量部署和并行安装
 - 采集系统级指标（CPU、内存、磁盘、网络等）
 - 默认端口：9100
-- 配置 Prometheus 抓取目标
+- 自动注册到 Prometheus 抓取目标
+- 支持目标服务器列表配置
 
 #### 1.5 监控集成
 - Prometheus 自动发现 Node Exporter 目标
@@ -161,9 +164,13 @@ Node Exporter 采集指标 → Prometheus 抓取 ────┘
 - 认证信息
 
 ### 目标服务器配置
-- 服务器 IP/主机名
-- SSH 认证信息
-- 组件部署选择
+- 服务器 IP/主机名列表
+- SSH 端口（默认 22）
+- SSH 认证方式（密钥/密码）
+- SSH 用户名和密码/密钥路径
+- 组件部署选择（Node Exporter、JMeter 等）
+- 服务器分组标签（如：web-server、db-server）
+- 并发部署数量限制
 
 ## 实现技术
 
@@ -215,6 +222,7 @@ PerfStackSuite/
 │   ├── grafana-datasource.yml # Grafana 数据源配置
 │   ├── influxdb.conf          # InfluxDB 配置文件模板
 │   ├── deploy.conf            # 部署配置文件
+│   ├── target_servers.conf    # 目标服务器列表配置（用于远程部署）
 │   └── dashboards/            # Grafana 监控面板模板
 │       ├── node-exporter-dashboard.json
 │       ├── prometheus-dashboard.json
@@ -417,25 +425,97 @@ PerfStackSuite/
 
 ### 5. install_node_exporter.sh（Node Exporter 安装脚本）
 
-**功能说明：** 在目标服务器上安装 Node Exporter，采集系统指标。
+**功能说明：** 在本地或远程目标服务器上安装 Node Exporter，采集系统指标，支持分布式部署。
 
 **操作步骤：**
+
+**本地安装模式：**
 1. 调用公共函数检查是否已安装 Node Exporter
 2. 从 `soft/` 目录解压 Node Exporter 到 `/opt/node_exporter`
-4. 将 node_exporter 二进制文件复制到 `/usr/local/bin/`（或创建软链接）
-5. 创建 systemd 服务文件 `/etc/systemd/system/node_exporter.service`：
+3. 将 node_exporter 二进制文件复制到 `/usr/local/bin/`（或创建软链接）
+4. 创建 systemd 服务文件 `/etc/systemd/system/node_exporter.service`：
    - 设置 ExecStart=/usr/local/bin/node_exporter
    - 可配置额外参数，如 --web.listen-address=:9100
-6. 重载并启动服务
-8. 检查服务状态
-9. 配置防火墙：
+5. 重载并启动服务
+6. 检查服务状态
+7. 配置防火墙：
    - CentOS：使用 firewall-cmd 开放 9100 端口
    - Ubuntu：使用 ufw allow 9100
-10. 验证：访问 http://localhost:9100/metrics 确认指标正常输出
-11. 获取本机 IP 地址
-12. 将本机 IP 和端口添加到 Prometheus 配置文件的 scrape_configs 中
-13. 重启 Prometheus 使配置生效
-14. 输出安装信息和注册状态
+8. 验证：访问 http://localhost:9100/metrics 确认指标正常输出
+9. 获取本机 IP 地址
+10. 将本机 IP 和端口添加到 Prometheus 配置文件的 scrape_configs 中
+11. 重启 Prometheus 使配置生效
+12. 输出安装信息和注册状态
+
+**远程部署模式（分布式）：**
+1. 读取目标服务器配置文件（`config/target_servers.conf`）：
+   - 服务器 IP/主机名列表
+   - SSH 端口、用户名、认证信息
+   - 服务器分组标签
+2. 验证 SSH 连接：
+   - 测试到每台服务器的 SSH 连通性
+   - 验证 SSH 认证（密钥或密码）
+3. 并发分发安装包：
+   - 使用 scp 将 node_exporter 安装包上传到目标服务器
+   - 上传到目标服务器的临时目录（如 /tmp/）
+   - 支持并发上传（可配置并发数，如 5 个并发）
+4. 远程执行安装：
+   - 通过 SSH 在目标服务器上执行安装命令
+   - 解压安装包到 `/opt/node_exporter`
+   - 创建 systemd 服务文件
+   - 启动并配置开机自启
+   - 配置防火墙规则
+   - 支持并发安装（使用后台任务或 xargs -P）
+5. 验证远程安装：
+   - 通过 curl/httpget 访问目标服务器的 9100 端口
+   - 验证 metrics 指标正常输出
+   - 检查 Node Exporter 服务状态
+6. 批量注册到 Prometheus：
+   - 收集所有目标服务器的 IP 地址
+   - 批量添加到 Prometheus 配置文件
+   - 根据 server_group 标签分组添加 job_name
+   - 重启 Prometheus 使配置生效
+7. 生成部署报告：
+   - 成功部署的服务器列表
+   - 失败的服务器列表及错误原因
+   - Prometheus 注册状态
+   - 提供重新部署失败服务器的选项
+
+**多服务器配置文件格式（target_servers.conf）：**
+```ini
+# 服务器分组
+[web_servers]
+server_group=web
+servers=192.168.1.10,192.168.1.11,192.168.1.12
+ssh_user=root
+ssh_port=22
+auth_type=key
+ssh_key_path=/root/.ssh/id_rsa
+
+[db_servers]
+server_group=db
+servers=192.168.1.20,192.168.1.21
+ssh_user=root
+ssh_port=22
+auth_type=password
+ssh_password=your_password
+
+# 或简化格式
+192.168.1.30|root|22|key|/root/.ssh/id_rsa|app_server
+192.168.1.31|root|22|password|your_password|app_server
+```
+
+**并发控制：**
+- 默认并发数：5 台服务器同时部署
+- 可通过配置文件调整并发数量
+- 支持失败重试机制
+- 超时控制（默认每台服务器 10 分钟超时）
+
+**错误处理：**
+- SSH 连接失败：记录并跳过，继续部署其他服务器
+- SCP 传输失败：重试 3 次
+- 远程安装失败：记录详细错误日志
+- 部分失败时提供清理选项或回滚机制
 
 ---
 
@@ -754,6 +834,18 @@ PerfStackSuite/
 - `check_port`：检查端口是否被占用
 - `wait_for_port`：等待端口监听
 
+**远程部署函数：**
+- `load_target_servers`：加载目标服务器配置文件
+- `validate_ssh_connection`：验证 SSH 连接（接受服务器、端口、认证信息）
+- `scp_upload`：通过 SCP 上传文件到远程服务器（支持重试）
+- `ssh_execute`：通过 SSH 在远程服务器执行命令
+- `parallel_deploy`：并发部署到多台服务器（使用 xargs -P 或后台任务）
+- `remote_install`：远程安装 Node Exporter 的完整流程
+- `collect_server_ips`：收集所有成功部署的服务器 IP
+- `batch_register_prometheus`：批量注册到 Prometheus
+- `generate_deploy_report`：生成部署报告（成功/失败列表）
+- `cleanup_failed_deploy`：清理部署失败的服务器上的临时文件
+
 **字体管理函数：**
 - `check_font`：检查字体是否已安装（接受字体名称参数）
 - `install_font_package`：安装系统字体包（根据 OS 类型选择包管理器）
@@ -857,9 +949,54 @@ SYSCTL_NF_CONNTRACK_TCP_TIMEOUT_TIME_WAIT=30
 SOFT_DIR=./soft
 CONFIG_DIR=./config
 
+# 远程部署配置
+TARGET_SERVERS_CONFIG=./config/target_servers.conf
+DEPLOY_PARALLEL_NUM=5
+DEPLOY_TIMEOUT=600
+SSH_CONNECT_TIMEOUT=30
+SCP_RETRY_COUNT=3
+
 # 日志配置
 LOG_FILE=/var/log/perfstacksuite/install.log
 LOG_LEVEL=INFO
+```
+
+### target_servers.conf 配置文件示例
+
+```ini
+# 远程部署目标服务器配置文件
+# 格式：IP|SSH用户|SSH端口|认证类型|认证信息|服务器分组
+
+# 认证类型：key（密钥）或 password（密码）
+# 服务器分组：用于 Prometheus 的 job_name 分类
+
+# 示例 1：使用 SSH 密钥认证
+192.168.1.10|root|22|key|/root/.ssh/id_rsa|web_servers
+192.168.1.11|root|22|key|/root/.ssh/id_rsa|web_servers
+
+# 示例 2：使用密码认证
+192.168.1.20|root|22|password|your_password|db_servers
+192.168.1.21|root|22|password|your_password|db_servers
+
+# 示例 3：使用非标准 SSH 端口
+192.168.1.30|deploy|2222|key|/home/deploy/.ssh/id_rsa|app_servers
+
+# 示例 4：INI 格式（可选）
+[web_servers]
+server_group=web
+servers=192.168.1.10,192.168.1.11,192.168.1.12
+ssh_user=root
+ssh_port=22
+auth_type=key
+ssh_key_path=/root/.ssh/id_rsa
+
+[db_servers]
+server_group=db
+servers=192.168.1.20,192.168.1.21
+ssh_user=root
+ssh_port=22
+auth_type=password
+ssh_password=your_password
 ```
 
 ---
