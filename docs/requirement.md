@@ -12,6 +12,7 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
 - 离线安装，从 `soft/` 目录读取安装包
 - 自动部署 Prometheus 时序数据库
 - 配置数据存储路径
+- 配置数据保留时间
 - 配置服务自启动
 - 默认端口：9090
 - 支持持久化存储配置
@@ -28,6 +29,7 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
 - 离线安装，从 `soft/` 目录读取安装包
 - 自动部署 InfluxDB 时序数据库
 - 配置数据库和用户权限
+- 配置数据保留策略和时长
 - 默认端口：8086
 - 支持数据保留策略配置
 - 用于 JMeter 测试结果存储
@@ -84,6 +86,18 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
 - 自动验证 Java 版本
 - 自动验证 JMeter 安装
 - 提供环境检查命令
+
+#### 3.4 网络连接自动回收配置
+- 配置 HTTP 连接池回收策略
+- 支持连接超时自动回收
+- 配置空闲连接清理参数
+- 防止连接泄漏和资源耗尽
+
+#### 3.5 操作系统内核参数优化
+- 优化 TCP TIME_WAIT 状态处理
+- 配置端口重用和快速回收
+- 调整 TCP 连接跟踪表大小
+- 优化系统网络栈性能
 
 ## 非功能需求
 
@@ -142,6 +156,7 @@ Node Exporter 采集指标 → Prometheus 抓取 ────┘
 ### 部署配置
 - 监控组件安装路径
 - 数据存储路径
+- 数据保留时间（Prometheus、InfluxDB）
 - 端口配置
 - 认证信息
 
@@ -186,6 +201,7 @@ PerfStackSuite/
 │   ├── install_node_exporter.sh # Node Exporter 安装脚本
 │   ├── install_jdk.sh         # JDK 安装脚本
 │   ├── install_jmeter.sh      # JMeter 安装脚本
+│   ├── install_sysctl.sh      # 系统内核参数优化脚本
 │   ├── config_ssh.sh          # SSH 配置脚本
 │   └── common.sh              # 公共函数库
 ├── config/                    # 配置文件目录
@@ -240,8 +256,9 @@ PerfStackSuite/
    - 2 - 仅安装监控系统
    - 3 - 仅安装 JDK + JMeter
    - 4 - 配置 SSH + X11
-   - 5 - 自定义安装
-   - 6 - 卸载组件
+   - 5 - 优化系统内核参数（TCP TIME_WAIT 处理）
+   - 6 - 自定义安装
+   - 7 - 卸载组件
    - 0 - 退出
 7. 根据用户选择，按顺序调用对应的安装脚本
 8. 记录安装日志到 `/var/log/perfstacksuite/install.log`
@@ -264,16 +281,20 @@ PerfStackSuite/
    - 从 `config/prometheus.yml` 复制到安装目录
    - 如配置文件不存在，则生成默认配置
 6. 配置数据存储路径（修改 prometheus.yml 中的 storage.tsdb.path）
-7. 配置抓取目标（添加 Node Exporter、InfluxDB 等抓取任务）
-8. 创建 systemd 服务文件 `/etc/systemd/system/prometheus.service`：
-   - 设置 ExecStart 指向 prometheus 二进制文件
+7. 配置数据保留时间：
+   - 设置 `--storage.tsdb.retention.time` 参数（从 deploy.conf 读取）
+   - 默认值：30d（30天）
+   - 支持格式：Xd（X天）、Xh（X小时）、Xw（X周）、Xy（X年）
+8. 配置抓取目标（添加 Node Exporter、InfluxDB 等抓取任务）
+9. 创建 systemd 服务文件 `/etc/systemd/system/prometheus.service`：
+   - 设置 ExecStart 指向 prometheus 二进制文件，包含 `--storage.tsdb.retention.time` 参数
    - 配置重启策略为 always
-9. 重载 systemd 配置（systemctl daemon-reload）
-10. 启动 Prometheus 服务（systemctl start prometheus）
-11. 设置开机自启（systemctl enable prometheus）
-12. 检查服务状态和端口监听
-13. 验证：访问 http://localhost:9090 确认服务正常
-14. 输出安装结果信息
+10. 重载 systemd 配置（systemctl daemon-reload）
+11. 启动 Prometheus 服务（systemctl start prometheus）
+12. 设置开机自启（systemctl enable prometheus）
+13. 检查服务状态和端口监听
+14. 验证：访问 http://localhost:9090 确认服务正常
+15. 输出安装结果信息，包括数据保留时间配置
 
 ---
 
@@ -343,7 +364,13 @@ PerfStackSuite/
     - 创建数据库 jmeter（用于存储测试结果）
     - 创建管理员用户（用户名/密码从配置文件读取）
     - 创建普通用户 jmeter_user
-    - 设置数据保留策略（例如：30 天）
+    - 配置数据保留策略：
+      - 策略名：默认策略或自定义策略名
+      - 保留时间：从 deploy.conf 读取 INFLUXDB_RETENTION 参数
+      - 默认值：30d（30天）
+      - 支持格式：Xd（X天）、Xh（X小时）、Xw（X周）
+      - 副本数量：1（单节点环境）
+      - 设置为默认策略
 11. 验证：使用 influx 命令连接并执行 SHOW DATABASES
 12. 输出连接信息和数据库名称
 
@@ -426,6 +453,13 @@ PerfStackSuite/
      - 设置 jmeter.save.saveservice.timestamp_format=yyyy/MM/dd HH:mm:ss.SSS
      - 设置 jmeter.save.saveservice.output_format=xml
      - 配置 sampleresult.default.encoding=UTF-8
+     - **配置网络连接回收参数：**
+       - `httpclient4.idle_timeout=60000` - 空闲连接超时时间（毫秒）
+       - `httpclient4.validate_after_inactivity=2000` - 连接验证间隔（毫秒）
+       - `httpclient4.time_to_live=60000` - 连接最大生存时间（毫秒）
+       - `httpclient4.max_retries=1` - 失败重试次数
+       - `httpclient4.request_sent_retry_enabled=false` - 请求发送失败是否重试
+       - `httpclient4.stale_checking_enabled=true` - 启用过期连接检查
 10. 安装 InfluxDB 后端监听器插件：
     - 下载或从本地复制插件 JAR 文件到 `lib/ext/` 目录
     - 插件文件：`influxdb2-listener-2.x.x.jar`
@@ -447,7 +481,102 @@ PerfStackSuite/
 
 ---
 
-### 8. config_ssh.sh（SSH 配置脚本）
+### 8. install_sysctl.sh（系统内核参数优化脚本）
+
+**功能说明：** 优化操作系统内核参数，特别是 TCP TIME_WAIT 状态处理，提高高并发场景下的网络性能。
+
+**操作步骤：**
+
+**备份现有配置：**
+1. 检查 `/etc/sysctl.conf` 文件是否存在
+2. 如果存在，备份到 `/etc/sysctl.conf.bak`
+3. 检查 `/etc/sysctl.d/` 目录下是否有自定义配置
+
+**生成内核参数配置文件：**
+1. 创建配置文件 `/etc/sysctl.d/99-perfstack-tuning.conf`
+2. 写入以下优化参数：
+
+   **TIME_WAIT 优化：**
+   ```bash
+   # 允许将 TIME_WAIT sockets 快速重用（对新的 TCP 连接）
+   net.ipv4.tcp_tw_reuse = 1
+
+   # 开启 TCP 连接快速回收（注意：可能引起 NAT 环境问题）
+   net.ipv4.tcp_tw_recycle = 0  # 默认关闭，NAT 环境下必须关闭
+
+   # 减少 TIME_WAIT 超时时间（默认 60 秒，可调整为 30 秒）
+   net.ipv4.tcp_fin_timeout = 30
+   ```
+
+   **端口范围优化：**
+   ```bash
+   # 扩大临时端口范围（默认 32768-60999，扩大到 1024-65535）
+   net.ipv4.ip_local_port_range = 1024 65535
+   ```
+
+   **TCP 连接跟踪优化：**
+   ```bash
+   # 增加 TCP 连接跟踪表大小（默认根据内存计算）
+   net.netfilter.nf_conntrack_max = 262144
+
+   # 减少连接跟踪超时时间
+   net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+   net.netfilter.nf_conntrack_tcp_timeout_close_wait = 15
+   net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
+   ```
+
+   **TCP 缓冲区优化：**
+   ```bash
+   # 增加 TCP 接收缓冲区大小
+   net.ipv4.tcp_rmem = 4096 87380 16777216
+
+   # 增加 TCP 发送缓冲区大小
+   net.ipv4.tcp_wmem = 4096 65536 16777216
+
+   # 增加 TCP 全缓冲区大小
+   net.core.rmem_max = 16777216
+   net.core.wmem_max = 16777216
+   net.core.netdev_max_backlog = 5000
+   ```
+
+   **其他优化：**
+   ```bash
+   # 启用 TCP 窗口缩放
+   net.ipv4.tcp_window_scaling = 1
+
+   # 启用选择性确认
+   net.ipv4.tcp_sack = 1
+
+   # 优化 SYN 握手
+   net.ipv4.tcp_syncookies = 1
+   net.ipv4.tcp_max_syn_backlog = 8192
+   net.ipv4.tcp_synack_retries = 2
+   ```
+
+**应用配置：**
+1. 执行 `sysctl -p /etc/sysctl.d/99-perfstack-tuning.conf` 应用配置
+2. 执行 `sysctl -a | grep tcp` 验证参数是否生效
+3. 输出当前内核参数值供用户确认
+
+**验证效果：**
+1. 执行 `netstat -an | grep TIME_WAIT | wc -l` 查看 TIME_WAIT 连接数
+2. 执行 `ss -s` 查看连接统计信息
+3. 执行 `cat /proc/sys/net/netfilter/nf_conntrack_count` 查看当前连接跟踪数
+4. 输出配置前后的对比说明
+
+**注意事项：**
+1. 警告用户 `tcp_tw_recycle` 在 NAT 环境下可能导致连接问题，默认关闭
+2. 提示某些参数需要重启网络服务或重启系统才能完全生效
+3. 说明这些优化主要针对高并发压测场景
+4. 提供恢复原始配置的方法（删除配置文件并重新加载）
+
+**配置持久化：**
+1. 配置文件会自动在系统重启后生效
+2. 配置文件位于 `/etc/sysctl.d/` 目录，会被 systemd-sysctl 自动加载
+
+---
+
+### 9. config_ssh.sh（SSH 配置脚本）
 
 **功能说明：** 配置 SSH 服务和 X11 Forwarding，支持 JMeter GUI 远程显示。
 
@@ -560,6 +689,18 @@ PerfStackSuite/
 - `load_config`：加载配置文件（读取 deploy.conf）
 - `get_config_value`：获取配置项的值
 - `update_config`：更新配置文件中的值
+- `configure_http_recycling`：配置 JMeter HTTP 连接回收参数
+  - 读取 deploy.conf 中的网络回收配置
+  - 自动更新 jmeter.properties 文件
+  - 验证参数有效性
+- `configure_prometheus_retention`：配置 Prometheus 数据保留时间
+  - 读取 PROMETHEUS_RETENTION_TIME 参数
+  - 更新 systemd 服务文件中的启动参数
+  - 验证时间格式（支持 d/h/w/y 后缀）
+- `configure_influxdb_retention`：配置 InfluxDB 数据保留策略
+  - 读取 INFLUXDB_RETENTION 参数
+  - 执行 InfluxDB 命令创建保留策略
+  - 验证时间格式（支持 d/h/w 后缀）
 
 **交互函数：**
 - `confirm`：确认提示（是/否）
@@ -616,6 +757,25 @@ INFLUXDB_JMETER_PASSWORD=jmeter123
 INFLUXDB_DB_NAME=jmeter
 INFLUXDB_RETENTION=30d
 
+# Prometheus 配置
+PROMETHEUS_RETENTION_TIME=30d
+
+# JMeter 网络连接回收配置
+JMETER_HTTP_IDLE_TIMEOUT=60000
+JMETER_HTTP_VALIDATE_INACTIVITY=2000
+JMETER_HTTP_TIME_TO_LIVE=60000
+JMETER_HTTP_MAX_RETRIES=1
+JMETER_HTTP_REQUEST_SENT_RETRY=false
+JMETER_HTTP_STALE_CHECKING=true
+
+# 系统内核参数优化配置
+SYSCTL_TCP_TW_REUSE=1
+SYSCTL_TCP_TW_RECYCLE=0
+SYSCTL_TCP_FIN_TIMEOUT=30
+SYSCTL_IP_LOCAL_PORT_RANGE="1024 65535"
+SYSCTL_NF_CONNTRACK_MAX=262144
+SYSCTL_NF_CONNTRACK_TCP_TIMEOUT_TIME_WAIT=30
+
 # 安装包路径
 SOFT_DIR=./soft
 CONFIG_DIR=./config
@@ -624,3 +784,5 @@ CONFIG_DIR=./config
 LOG_FILE=/var/log/perfstacksuite/install.log
 LOG_LEVEL=INFO
 ```
+
+---
