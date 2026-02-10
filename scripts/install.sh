@@ -77,6 +77,10 @@ parse_arguments() {
                 CHOICE=6
                 shift
                 ;;
+            --uninstall)
+                CHOICE=8
+                shift
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -104,6 +108,7 @@ show_help() {
     echo "  --ssh           配置 SSH + X11"
     echo "  --sysctl        优化系统内核参数"
     echo "  --fonts         安装中文字体"
+    echo "  --uninstall     卸载组件"
     echo "  --help, -h      显示此帮助信息"
     echo ""
     echo "如果不指定选项，将进入交互式菜单模式"
@@ -319,7 +324,95 @@ install_custom() {
 # ============================================
 
 uninstall_components() {
-    log_warn "卸载功能开发中..."
+    log_info "卸载组件模式"
+    echo ""
+    echo "请选择要卸载的组件（多选用空格分隔）:"
+    echo "  1 - Prometheus"
+    echo "  2 - Grafana"
+    echo "  3 - InfluxDB"
+    echo "  4 - Node Exporter"
+    echo "  5 - JDK"
+    echo "  6 - JMeter"
+    echo "  all - 全部卸载"
+    echo ""
+    read -p "请输入组件编号: " components
+
+    if [ "$components" = "all" ]; then
+        components="1 2 3 4 5 6"
+    fi
+
+    local uninstalled_components=()
+    local failed_components=()
+
+    for comp in $components; do
+        case $comp in
+            1)
+                local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+                if [ -f "$script_dir/uninstall_prometheus.sh" ]; then
+                    log_info "卸载 Prometheus..."
+                    if bash "$script_dir/uninstall_prometheus.sh"; then
+                        uninstalled_components+=("Prometheus")
+                    else
+                        failed_components+=("Prometheus")
+                    fi
+                else
+                    log_warn "Prometheus 卸载脚本不存在，跳过"
+                fi
+                ;;
+            2)
+                if uninstall_grafana; then
+                    uninstalled_components+=("Grafana")
+                else
+                    failed_components+=("Grafana")
+                fi
+                ;;
+            3)
+                if uninstall_influxdb; then
+                    uninstalled_components+=("InfluxDB")
+                else
+                    failed_components+=("InfluxDB")
+                fi
+                ;;
+            4)
+                if uninstall_node_exporter; then
+                    uninstalled_components+=("Node Exporter")
+                else
+                    failed_components+=("Node Exporter")
+                fi
+                ;;
+            5)
+                if uninstall_jdk; then
+                    uninstalled_components+=("JDK")
+                else
+                    failed_components+=("JDK")
+                fi
+                ;;
+            6)
+                if uninstall_jmeter; then
+                    uninstalled_components+=("JMeter")
+                else
+                    failed_components+=("JMeter")
+                fi
+                ;;
+            *)
+                log_warn "无效的组件编号: $comp"
+                ;;
+        esac
+    done
+
+    # 显示卸载结果
+    echo ""
+    if [ ${#uninstalled_components[@]} -gt 0 ]; then
+        log_success "已卸载: ${uninstalled_components[*]}"
+    fi
+
+    if [ ${#failed_components[@]} -gt 0 ]; then
+        log_warn "卸载失败: ${failed_components[*]}"
+    fi
+
+    if [ ${#uninstalled_components[@]} -eq 0 ] && [ ${#failed_components[@]} -eq 0 ]; then
+        log_info "没有组件被卸载"
+    fi
 }
 
 # ============================================

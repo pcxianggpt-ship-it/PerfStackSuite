@@ -301,3 +301,32 @@ install_chinese_fonts() {
     log_info "中文字体安装功能开发中..."
     return 1
 }
+
+# ============================================
+# 卸载函数（后续实现）
+# ============================================
+
+uninstall_grafana() {
+    log_info "Grafana 卸载功能开发中..."
+    return 1
+}
+
+uninstall_influxdb() {
+    log_info "InfluxDB 卸载功能开发中..."
+    return 1
+}
+
+uninstall_node_exporter() {
+    log_info "Node Exporter 卸载功能开发中..."
+    return 1
+}
+
+uninstall_jdk() {
+    log_info "JDK 卸载功能开发中..."
+    return 1
+}
+
+uninstall_jmeter() {
+    log_info "JMeter 卸载功能开发中..."
+    return 1
+}
