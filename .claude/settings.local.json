@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(tree:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(bash:*)"
     ],
     "deny": [],
     "ask": []

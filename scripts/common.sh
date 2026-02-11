@@ -263,8 +263,17 @@ install_prometheus() {
 }
 
 install_grafana() {
-    log_info "Grafana 安装功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local grafana_script="${script_dir}/install_grafana.sh"
+
+    if [ ! -f "$grafana_script" ]; then
+        log_error "Grafana 安装脚本不存在: $grafana_script"
+        return 1
+    fi
+
+    log_info "开始安装 Grafana..."
+    bash "$grafana_script"
+    return $?
 }
 
 install_influxdb() {
@@ -307,8 +316,17 @@ install_chinese_fonts() {
 # ============================================
 
 uninstall_grafana() {
-    log_info "Grafana 卸载功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local grafana_script="${script_dir}/uninstall_grafana.sh"
+
+    if [ ! -f "$grafana_script" ]; then
+        log_error "Grafana 卸载脚本不存在: $grafana_script"
+        return 1
+    fi
+
+    log_info "开始卸载 Grafana..."
+    bash "$grafana_script"
+    return $?
 }
 
 uninstall_influxdb() {
