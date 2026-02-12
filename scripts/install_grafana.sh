@@ -18,9 +18,22 @@ source "${SCRIPT_DIR}/common.sh"
 
 GRAFANA_VERSION="${GRAFANA_VERSION:-12.3.2}"
 GRAFANA_PORT="${GRAFANA_PORT:-3000}"
-GRAFANA_INSTALL_DIR="${INSTALL_BASE_DIR}/grafana"
-GRAFANA_DATA_DIR="${DATA_BASE_DIR}/grafana"
-GRAFANA_LOG_DIR="/var/log/grafana"
+
+# 检测是否为 root 用户，设置不同的安装路径
+if [ "$(id -u)" -eq 0 ]; then
+    # root 用户安装到系统目录
+    GRAFANA_INSTALL_DIR="${INSTALL_BASE_DIR}/grafana"
+    GRAFANA_DATA_DIR="${DATA_BASE_DIR}/grafana"
+    GRAFANA_LOG_DIR="/var/log/grafana"
+    IS_ROOT_INSTALL=true
+else
+    # 普通用户安装到用户目录
+    GRAFANA_INSTALL_DIR="$HOME/grafana"
+    GRAFANA_DATA_DIR="$HOME/grafana/data"
+    GRAFANA_LOG_DIR="$HOME/grafana/logs"
+    IS_ROOT_INSTALL=false
+fi
+
 GRAFANA_PLUGINS_DIR="${GRAFANA_INSTALL_DIR}/plugins"
 GRAFANA_PROVISIONING_DIR="${GRAFANA_INSTALL_DIR}/provisioning"
 
@@ -468,11 +481,20 @@ EOF
 }
 
 # ============================================
-# 创建 systemd 服务文件
+# 创建 systemd 服务文件或启动脚本
 # ============================================
 
 create_systemd_service() {
-    log_info "创建 Grafana systemd 服务..."
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        create_system_service
+    else
+        create_user_service_or_scripts
+    fi
+}
+
+# 创建系统级 systemd 服务（需要 root）
+create_system_service() {
+    log_info "创建 Grafana systemd 系统服务..."
 
     local service_file="/etc/systemd/system/grafana.service"
 
@@ -506,9 +528,6 @@ RestartSec=10
 LimitNOFILE=65536
 LimitNPROC=8192
 
-# 安全加固
-NoNewPrivileges=true
-
 # 环境变量
 Environment=GF_PATHS_HOME=${GRAFANA_INSTALL_DIR}
 Environment=GF_PATHS_DATA=${GRAFANA_DATA_DIR}
@@ -527,11 +546,190 @@ EOF
     log_success "systemd 服务创建完成"
 }
 
+# 创建用户级服务或启动脚本（普通用户）
+create_user_service_or_scripts() {
+    log_info "配置 Grafana 启动方式..."
+
+    # 尝试创建用户级 systemd 服务
+    if create_user_systemd_service; then
+        log_success "使用用户级 systemd 服务"
+        GRAFANA_SERVICE_TYPE="user-systemd"
+    else
+        # 回退到启动脚本
+        log_info "创建启动脚本..."
+        create_startup_scripts
+        GRAFANA_SERVICE_TYPE="script"
+    fi
+}
+
+# 创建用户级 systemd 服务
+create_user_systemd_service() {
+    local user_service_dir="$HOME/.config/systemd/user"
+    local service_file="$user_service_dir/grafana.service"
+
+    # 创建目录
+    mkdir -p "$user_service_dir"
+
+    # 检查 systemd 用户服务是否支持
+    if ! systemctl --user list-units &>/dev/null; then
+        return 1
+    fi
+
+    cat > "$service_file" <<EOF
+[Unit]
+Description=Grafana Visualization Platform
+Documentation=https://grafana.com/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${GRAFANA_INSTALL_DIR}
+
+# 启动命令
+ExecStart=${GRAFANA_INSTALL_DIR}/bin/grafana server \\
+    --config=${GRAFANA_INSTALL_DIR}/conf/grafana.ini \\
+    --homepath=${GRAFANA_INSTALL_DIR}
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=8192
+
+# 环境变量
+Environment=GF_PATHS_HOME=${GRAFANA_INSTALL_DIR}
+Environment=GF_PATHS_DATA=${GRAFANA_DATA_DIR}
+Environment=GF_PATHS_LOGS=${GRAFANA_LOG_DIR}
+Environment=GF_PATHS_PLUGINS=${GRAFANA_PLUGINS_DIR}
+Environment=GF_PATHS_PROVISIONING=${GRAFANA_PROVISIONING_DIR}
+
+[Install]
+WantedBy=default.target
+EOF
+
+    # 重载用户 systemd
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    log_success "用户级 systemd 服务创建完成"
+    return 0
+}
+
+# 创建启动脚本（备选方案）
+create_startup_scripts() {
+    # 创建启动脚本
+    cat > "$GRAFANA_INSTALL_DIR/start.sh" <<'SCRIPT_EOF'
+#!/bin/bash
+# Grafana 启动脚本
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export GRAFANA_HOME="$SCRIPT_DIR"
+export GRAFANA_DATA_DIR="$SCRIPT_DIR/data"
+export GRAFANA_LOGS_DIR="$SCRIPT_DIR/logs"
+
+# 检查是否已运行
+if [ -f "$GRAFANA_DATA_DIR/grafana.pid" ]; then
+    PID=$(cat "$GRAFANA_DATA_DIR/grafana.pid")
+    if ps -p "$PID" > /dev/null 2>&1; then
+        echo "Grafana 已在运行 (PID: $PID)"
+        exit 1
+    fi
+fi
+
+# 启动 Grafana
+echo "启动 Grafana..."
+nohup "$GRAFANA_HOME/bin/grafana" server \
+    --config="$GRAFANA_HOME/conf/grafana.ini" \
+    --homepath="$GRAFANA_HOME" \
+    > "$GRAFANA_LOGS_DIR/grafana.out" 2>&1 &
+
+PID=$!
+echo $PID > "$GRAFANA_DATA_DIR/grafana.pid"
+
+echo "Grafana 已启动 (PID: $PID)"
+echo "日志: $GRAFANA_LOGS_DIR/grafana.out"
+SCRIPT_EOF
+
+    # 创建停止脚本
+    cat > "$GRAFANA_INSTALL_DIR/stop.sh" <<'SCRIPT_EOF'
+#!/bin/bash
+# Grafana 停止脚本
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="$SCRIPT_DIR/data/grafana.pid"
+
+if [ ! -f "$PID_FILE" ]; then
+    echo "Grafana 未运行"
+    exit 0
+fi
+
+PID=$(cat "$PID_FILE")
+
+if ps -p "$PID" > /dev/null 2>&1; then
+    echo "停止 Grafana (PID: $PID)..."
+    kill "$PID"
+    sleep 2
+
+    # 强制杀死如果还在运行
+    if ps -p "$PID" > /dev/null 2>&1; then
+        echo "强制停止 Grafana..."
+        kill -9 "$PID"
+    fi
+
+    rm -f "$PID_FILE"
+    echo "Grafana 已停止"
+else
+    echo "Grafana 进程不存在"
+    rm -f "$PID_FILE"
+fi
+SCRIPT_EOF
+
+    # 创建状态检查脚本
+    cat > "$GRAFANA_INSTALL_DIR/status.sh" <<'SCRIPT_EOF'
+#!/bin/bash
+# Grafana 状态检查脚本
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="$SCRIPT_DIR/data/grafana.pid"
+
+if [ ! -f "$PID_FILE" ]; then
+    echo "Grafana 未运行"
+    exit 1
+fi
+
+PID=$(cat "$PID_FILE")
+
+if ps -p "$PID" > /dev/null 2>&1; then
+    echo "Grafana 正在运行 (PID: $PID)"
+    exit 0
+else
+    echo "Grafana 未运行 (PID 文件存在但进程不存在)"
+    exit 1
+fi
+SCRIPT_EOF
+
+    # 添加执行权限
+    chmod +x "$GRAFANA_INSTALL_DIR/start.sh"
+    chmod +x "$GRAFANA_INSTALL_DIR/stop.sh"
+    chmod +x "$GRAFANA_INSTALL_DIR/status.sh"
+
+    log_success "启动脚本创建完成"
+}
+
 # ============================================
-# 配置防火墙
+# 配置防火墙（仅 root 安装）
 # ============================================
 
 configure_firewall() {
+    # 普通用户无法配置防火墙
+    if [ "$IS_ROOT_INSTALL" = false ]; then
+        log_info "普通用户安装，跳过防火墙配置"
+        log_warn "注意：需要手动配置防火墙开放端口 ${GRAFANA_PORT}"
+        return 0
+    fi
+
     log_info "配置防火墙规则..."
 
     local os_type=$(get_os_type)
@@ -565,7 +763,16 @@ configure_firewall() {
 # ============================================
 
 start_service() {
-    log_info "启动 Grafana 服务..."
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        start_system_service
+    else
+        start_user_service
+    fi
+}
+
+# 启动系统级服务（root）
+start_system_service() {
+    log_info "启动 Grafana 系统服务..."
 
     # 启用服务
     systemctl enable grafana
@@ -589,6 +796,41 @@ start_service() {
         log_success "Grafana 端口 ${GRAFANA_PORT} 监听正常"
     else
         log_error "Grafana 端口 ${GRAFANA_PORT} 未监听"
+        exit 1
+    fi
+}
+
+# 启动用户级服务（普通用户）
+start_user_service() {
+    log_info "启动 Grafana 服务..."
+
+    if [ "$GRAFANA_SERVICE_TYPE" = "user-systemd" ]; then
+        # 使用用户级 systemd
+        systemctl --user enable grafana 2>/dev/null || true
+        systemctl --user start grafana
+
+        log_info "等待 Grafana 启动..."
+        sleep 10
+
+        if systemctl --user is-active --quiet grafana; then
+            log_success "Grafana 服务启动成功"
+        else
+            log_error "Grafana 服务启动失败"
+            journalctl --user -u grafana -n 50 || true
+            exit 1
+        fi
+    else
+        # 使用启动脚本
+        "$GRAFANA_INSTALL_DIR/start.sh"
+        sleep 5
+    fi
+
+    # 检查端口监听
+    if wait_for_port "$GRAFANA_PORT" 30; then
+        log_success "Grafana 端口 ${GRAFANA_PORT} 监听正常"
+    else
+        log_error "Grafana 端口 ${GRAFANA_PORT} 未监听"
+        log_error "请检查日志: $GRAFANA_LOG_DIR/grafana.out"
         exit 1
     fi
 }
@@ -670,29 +912,64 @@ show_install_info() {
     echo "  日志目录: $GRAFANA_LOG_DIR"
     echo "  插件目录: $GRAFANA_PLUGINS_DIR"
     echo "  服务端口: $GRAFANA_PORT"
+
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        echo "  安装模式: 系统级安装 (root)"
+    else
+        echo "  安装模式: 用户级安装 ($USER)"
+    fi
     echo ""
+
     echo "访问地址："
     echo "  - Web UI: http://$(get_local_ip):${GRAFANA_PORT}"
     echo ""
+
     echo "默认凭据："
     echo "  - 用户名: $GRAFANA_ADMIN_USER"
     echo "  - 密码: $GRAFANA_ADMIN_PASSWORD"
     echo "  ⚠️  重要：请在首次登录后修改默认密码！"
     echo ""
+
     echo "已配置数据源："
     echo "  - Prometheus (http://localhost:9090)"
     echo ""
+
     echo "服务管理："
-    echo "  - 启动: systemctl start grafana"
-    echo "  - 停止: systemctl stop grafana"
-    echo "  - 重启: systemctl restart grafana"
-    echo "  - 状态: systemctl status grafana"
-    echo "  - 日志: journalctl -u grafana -f"
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        echo "  - 启动: systemctl start grafana"
+        echo "  - 停止: systemctl stop grafana"
+        echo "  - 重启: systemctl restart grafana"
+        echo "  - 状态: systemctl status grafana"
+        echo "  - 日志: journalctl -u grafana -f"
+    else
+        if [ "$GRAFANA_SERVICE_TYPE" = "user-systemd" ]; then
+            echo "  - 启动: systemctl --user start grafana"
+            echo "  - 停止: systemctl --user stop grafana"
+            echo "  - 重启: systemctl --user restart grafana"
+            echo "  - 状态: systemctl --user status grafana"
+            echo "  - 日志: journalctl --user -u grafana -f"
+        else
+            echo "  - 启动: $GRAFANA_INSTALL_DIR/start.sh"
+            echo "  - 停止: $GRAFANA_INSTALL_DIR/stop.sh"
+            echo "  - 状态: $GRAFANA_INSTALL_DIR/status.sh"
+            echo "  - 日志: tail -f $GRAFANA_LOG_DIR/grafana.out"
+        fi
+    fi
     echo ""
+
     echo "配置文件："
     echo "  - $GRAFANA_INSTALL_DIR/conf/grafana.ini"
     echo "  - Provisioning: $GRAFANA_PROVISIONING_DIR"
     echo ""
+
+    if [ "$IS_ROOT_INSTALL" = false ]; then
+        echo "提示："
+        echo "  - 如需开机自启，在 ~/.bash_profile 中添加:"
+        echo "    $GRAFANA_INSTALL_DIR/start.sh"
+        echo "  - 如需配置防火墙，请联系管理员开放端口 ${GRAFANA_PORT}"
+        echo ""
+    fi
+
     echo "============================================"
     echo ""
 }

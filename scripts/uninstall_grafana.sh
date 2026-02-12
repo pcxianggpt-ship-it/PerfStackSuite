@@ -18,9 +18,22 @@ source "${SCRIPT_DIR}/common.sh"
 
 GRAFANA_VERSION="${GRAFANA_VERSION:-12.3.2}"
 GRAFANA_PORT="${GRAFANA_PORT:-3000}"
-GRAFANA_INSTALL_DIR="${INSTALL_BASE_DIR}/grafana"
-GRAFANA_DATA_DIR="${DATA_BASE_DIR}/grafana"
-GRAFANA_LOG_DIR="/var/log/grafana"
+
+# 检测是否为 root 用户，设置不同的安装路径
+if [ "$(id -u)" -eq 0 ]; then
+    # root 用户安装到系统目录
+    GRAFANA_INSTALL_DIR="${INSTALL_BASE_DIR}/grafana"
+    GRAFANA_DATA_DIR="${DATA_BASE_DIR}/grafana"
+    GRAFANA_LOG_DIR="/var/log/grafana"
+    IS_ROOT_INSTALL=true
+else
+    # 普通用户安装到用户目录
+    GRAFANA_INSTALL_DIR="$HOME/grafana"
+    GRAFANA_DATA_DIR="$HOME/grafana/data"
+    GRAFANA_LOG_DIR="$HOME/grafana/logs"
+    IS_ROOT_INSTALL=false
+fi
+
 GRAFANA_PLUGINS_DIR="${GRAFANA_INSTALL_DIR}/plugins"
 
 # ============================================
@@ -38,8 +51,14 @@ show_uninstall_info() {
     echo "  - 安装目录: $GRAFANA_INSTALL_DIR"
     echo "  - 数据目录: $GRAFANA_DATA_DIR"
     echo "  - 日志目录: $GRAFANA_LOG_DIR"
-    echo "  - 插件目录: $GRAFANA_PLUGINS_DIR"
-    echo "  - systemd 服务: /etc/systemd/system/grafana.service"
+
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        echo "  - systemd 服务: /etc/systemd/system/grafana.service"
+    else
+        echo "  - 用户服务: ~/.config/systemd/user/grafana.service"
+        echo "  - 启动脚本: $GRAFANA_INSTALL_DIR/{start,stop,status}.sh"
+    fi
+
     echo ""
     echo "⚠️  警告：此操作不可逆！"
     echo ""
@@ -68,17 +87,6 @@ confirm_uninstall() {
         log_info "保留 Grafana 数据"
     fi
 
-    # 询问是否删除插件
-    echo ""
-    read -p "是否删除已安装的插件？(y/N): " delete_plugins
-    if [ "$delete_plugins" = "y" ] || [ "$delete_plugins" = "Y" ]; then
-        DELETE_PLUGINS=true
-        log_info "将删除所有插件"
-    else
-        DELETE_PLUGINS=false
-        log_info "保留插件目录"
-    fi
-
     echo ""
 }
 
@@ -104,23 +112,44 @@ check_grafana_installed() {
 stop_service() {
     log_info "停止 Grafana 服务..."
 
-    # 检查服务是否存在
-    if systemctl list-unit-files | grep -q "^grafana.service"; then
-        # 停止服务
-        if systemctl is-active --quiet grafana; then
-            systemctl stop grafana
-            log_success "Grafana 服务已停止"
-        else
-            log_info "Grafana 服务未运行"
-        fi
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        # root 安装：停止系统服务
+        if systemctl list-unit-files | grep -q "^grafana.service"; then
+            if systemctl is-active --quiet grafana; then
+                systemctl stop grafana
+                log_success "Grafana 服务已停止"
+            else
+                log_info "Grafana 服务未运行"
+            fi
 
-        # 禁用服务
-        if systemctl is-enabled --quiet grafana 2>/dev/null; then
-            systemctl disable grafana
-            log_success "Grafana 服务已禁用"
+            if systemctl is-enabled --quiet grafana 2>/dev/null; then
+                systemctl disable grafana
+                log_success "Grafana 服务已禁用"
+            fi
+        else
+            log_warn "未找到 Grafana systemd 服务"
         fi
     else
-        log_warn "未找到 Grafana systemd 服务"
+        # 普通用户安装：停止用户服务或使用脚本
+        # 尝试用户级 systemd
+        if systemctl --user list-units &>/dev/null; then
+            if systemctl --user is-active --quiet grafana 2>/dev/null; then
+                systemctl --user stop grafana
+                log_success "Grafana 服务已停止"
+            fi
+            if systemctl --user is-enabled --quiet grafana 2>/dev/null; then
+                systemctl --user disable grafana
+            fi
+        fi
+
+        # 使用启动脚本停止
+        if [ -f "$GRAFANA_INSTALL_DIR/stop.sh" ]; then
+            "$GRAFANA_INSTALL_DIR/stop.sh"
+        fi
+
+        # 手动杀死进程
+        pkill -f "grafana server" 2>/dev/null || true
+        sleep 2
     fi
 }
 
@@ -129,7 +158,16 @@ stop_service() {
 # ============================================
 
 remove_systemd_service() {
-    log_info "删除 systemd 服务文件..."
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        remove_system_service_file
+    else
+        remove_user_service_file
+    fi
+}
+
+# 删除系统级服务文件（需要 root）
+remove_system_service_file() {
+    log_info "删除 systemd 系统服务文件..."
 
     local service_file="/etc/systemd/system/grafana.service"
 
@@ -149,11 +187,42 @@ remove_systemd_service() {
     fi
 }
 
+# 删除用户级服务文件（普通用户）
+remove_user_service_file() {
+    log_info "删除 systemd 用户服务文件..."
+
+    local user_service_dir="$HOME/.config/systemd/user"
+    local service_file="$user_service_dir/grafana.service"
+
+    if [ -f "$service_file" ]; then
+        rm -f "$service_file"
+        log_success "用户级 systemd 服务文件已删除"
+
+        # 重载用户 systemd
+        systemctl --user daemon-reload 2>/dev/null || true
+        log_info "用户 systemd 配置已重载"
+    fi
+
+    # 删除启动脚本
+    if [ -f "$GRAFANA_INSTALL_DIR/start.sh" ]; then
+        rm -f "$GRAFANA_INSTALL_DIR/start.sh"
+        rm -f "$GRAFANA_INSTALL_DIR/stop.sh"
+        rm -f "$GRAFANA_INSTALL_DIR/status.sh"
+        log_success "启动脚本已删除"
+    fi
+}
+
 # ============================================
-# 删除防火墙规则
+# 删除防火墙规则（仅 root 安装）
 # ============================================
 
 remove_firewall_rules() {
+    # 普通用户无法配置防火墙
+    if [ "$IS_ROOT_INSTALL" = false ]; then
+        log_info "普通用户安装，跳过防火墙配置"
+        return 0
+    fi
+
     log_info "删除防火墙规则..."
 
     local os_type=$(get_os_type)
@@ -194,25 +263,6 @@ remove_install_dir() {
         log_success "安装目录已删除: $GRAFANA_INSTALL_DIR"
     else
         log_warn "安装目录不存在: $GRAFANA_INSTALL_DIR"
-    fi
-}
-
-# ============================================
-# 删除插件目录
-# ============================================
-
-remove_plugins_dir() {
-    if [ "$DELETE_PLUGINS" = true ]; then
-        log_info "删除插件目录..."
-
-        if [ -d "$GRAFANA_PLUGINS_DIR" ]; then
-            rm -rf "$GRAFANA_PLUGINS_DIR"
-            log_success "插件目录已删除: $GRAFANA_PLUGINS_DIR"
-        else
-            log_warn "插件目录不存在: $GRAFANA_PLUGINS_DIR"
-        fi
-    else
-        log_info "保留插件目录: $GRAFANA_PLUGINS_DIR"
     fi
 }
 
@@ -321,17 +371,12 @@ show_completion_info() {
         echo ""
     fi
 
-    if [ "$DELETE_PLUGINS" = false ]; then
-        echo "保留插件："
-        echo "  - 插件目录: $GRAFANA_PLUGINS_DIR"
-        echo ""
-        echo "如需删除插件，请手动执行："
-        echo "  rm -rf $GRAFANA_PLUGINS_DIR"
-        echo ""
-    fi
-
     echo "备份文件位置："
-    echo "  - /etc/systemd/system/grafana.service.bak.*"
+    if [ "$IS_ROOT_INSTALL" = true ]; then
+        echo "  - /etc/systemd/system/grafana.service.bak.*"
+    else
+        echo "  - ~/.config/systemd/user/grafana.service.bak.*"
+    fi
     echo ""
 
     echo "日志文件："
@@ -376,9 +421,6 @@ main() {
 
     # 删除安装目录
     remove_install_dir
-
-    # 删除插件目录
-    remove_plugins_dir
 
     # 删除数据目录
     remove_data_dir
