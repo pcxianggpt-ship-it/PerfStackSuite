@@ -11,38 +11,92 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
 #### 1.1 Prometheus 部署
 - 离线安装，从 `soft/` 目录读取安装包
 - 自动部署 Prometheus 时序数据库
+- **统一目录架构**（root 和普通用户使用相同的目录结构）：
+  - 安装目录：`$HOME/prometheus`
+    - root 用户：`/root/prometheus`
+    - 普通用户：`/home/username/prometheus`
+  - 数据目录：`$HOME/prometheus/data`
+  - 日志目录：`$HOME/prometheus/logs`
+  - 服务管理：根据用户类型自动适配
+    - root 用户：systemd 系统服务（`/etc/systemd/system/prometheus.service`）
+    - 普通用户：systemd 用户服务（`~/.config/systemd/user/prometheus.service`）
+  - 防火墙配置：root 自动配置，普通用户提示手动配置
+- **无专用用户创建**：使用当前用户（root 或普通用户）直接运行
+- **无权限管理**：不进行 chown 等权限操作，文件创建者即所有者
 - 配置数据存储路径
-- 配置数据保留时间
-- 配置服务自启动
+- 配置数据保留时间（默认 30d）
+- 配置服务自启动（root 用户：systemctl enable；普通用户：需手动配置 ~/.bash_profile）
 - 默认端口：9090
 - 支持持久化存储配置
 
 #### 1.2 Grafana 部署
 - 离线安装，从 `soft/` 目录读取安装包
 - 自动部署 Grafana 可视化平台
-- 配置数据源（Prometheus、InfluxDB）
+- **统一目录架构**（root 和普通用户使用相同的目录结构）：
+  - 安装目录：`$HOME/grafana`
+    - root 用户：`/root/grafana`
+    - 普通用户：`/home/username/grafana`
+  - 数据目录：`$HOME/grafana/data`
+  - 日志目录：`$HOME/grafana/logs`
+  - 配置目录：`$HOME/grafana/conf`
+  - 插件目录：`$HOME/grafana/plugins`
+  - Provisioning 目录：`$HOME/grafana/conf/provisioning/`
+  - 服务管理：根据用户类型自动适配
+    - root 用户：systemd 系统服务（`/etc/systemd/system/grafana.service`）
+    - 普通用户：systemd 用户服务（`~/.config/systemd/user/grafana.service`）
+  - 防火墙配置：root 自动配置，普通用户提示手动配置
+- **无专用用户创建**：使用当前用户（root 或普通用户）直接运行
+- **无权限管理**：不进行 chown 等权限操作，文件创建者即所有者
+- 配置数据源（Prometheus、InfluxDB）通过 Provisioning 自动配置
 - 默认端口：3000
-- 预配置常用监控面板模板
-- 配置管理员账号
+- 预配置常用监控面板模板（通过 dashboards provisioning）
+- 配置管理员账号（默认 admin/admin123）
 
 #### 1.3 InfluxDB 部署
 - 离线安装，从 `soft/` 目录读取安装包
 - 自动部署 InfluxDB 时序数据库
+- **统一目录架构**（root 和普通用户使用相同的目录结构）：
+  - 安装目录：`$HOME/influxdb`
+    - root 用户：`/root/influxdb`
+    - 普通用户：`/home/username/influxdb`
+  - 数据目录：`$HOME/influxdb/data`
+  - 元数据目录：`$HOME/influxdb/meta`
+  - 日志目录：`$HOME/influxdb/logs`
+  - 配置目录：`$HOME/influxdb/conf`
+  - 服务管理：根据用户类型自动适配
+    - root 用户：systemd 系统服务（`/etc/systemd/system/influxdb.service`）
+    - 普通用户：systemd 用户服务（`~/.config/systemd/user/influxdb.service`）
+  - 防火墙配置：root 自动配置，普通用户提示手动配置
+- **无专用用户创建**：使用当前用户（root 或普通用户）直接运行
+- **无权限管理**：不进行 chown 等权限操作，文件创建者即所有者
 - 配置数据库和用户权限
 - 配置数据保留策略和时长
 - 默认端口：8086
-- 支持数据保留策略配置
+- 支持数据保留策略配置（默认 30d）
 - 用于 JMeter 测试结果存储
 
 #### 1.4 Node Exporter 部署
 - 离线安装，从 `soft/` 目录读取安装包
-- 支持本地安装和远程分布式部署
-- 通过 SSH/SCP 自动分发到多台目标服务器
-- 支持批量部署和并行安装
+- **统一目录架构**（root 和普通用户使用相同的目录结构）：
+  - 安装目录：`$HOME/node_exporter`
+    - root 用户：`/root/node_exporter`
+    - 普通用户：`/home/username/node_exporter`
+  - 二进制文件：`$HOME/node_exporter/node_exporter`
+  - 服务管理：根据用户类型自动适配
+    - root 用户：systemd 系统服务（`/etc/systemd/system/node_exporter.service`）
+    - 普通用户：systemd 用户服务（`~/.config/systemd/user/node_exporter.service`）
+  - 防火墙配置：root 自动配置，普通用户提示手动配置
+- **支持远程分布式部署**：
+  - 通过 SSH/SCP 自动分发到多台目标服务器
+  - 支持批量部署和并行安装
+  - 目标服务器统一使用相同目录结构
+  - 远程服务器自动适配 systemd 服务类型
 - 采集系统级指标（CPU、内存、磁盘、网络等）
 - 默认端口：9100
 - 自动注册到 Prometheus 抓取目标
 - 支持目标服务器列表配置
+- **无专用用户创建**：使用当前用户（root 或普通用户）直接运行
+- **无权限管理**：不进行 chown 等权限操作，文件创建者即所有者
 
 #### 1.5 监控集成
 - Prometheus 自动发现 Node Exporter 目标
@@ -112,6 +166,10 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
 ### 4.2 兼容性
 - 支持主流 Linux 发行版（CentOS、Ubuntu、Debian 等）
 - 支持 x86_64 和 ARM64 架构
+- **支持 root 用户和普通用户安装**（无需 sudo 权限）
+  - 真实场景：只有普通用户权限的服务器环境
+  - 无需 root 密码或 sudo 权限即可完成安装
+  - 自动检测用户类型并适配安装路径和服务管理方式
 
 ### 4.3 可维护性
 - 模块化设计，各组件可独立部署
@@ -175,9 +233,176 @@ Node Exporter 采集指标 → Prometheus 抓取 ────┘
 ## 实现技术
 
 - 编程语言：Shell 脚本（Bash）
-- 支持系统：CentOS 7+、Ubuntu 18.04+、Debian 9+
+- 支持系统：CentOS 7+、Ubuntu 18.04+、Debian 9+、麒麟 V10
 - 架构支持：x86_64、ARM64
 - 安装方式：离线安装，安装包存放在 `soft/` 目录
+
+## 双模式安装架构
+
+PerfStackSuite 采用双模式安装架构，支持 root 用户和普通用户两种安装场景，满足真实环境中的不同权限需求。
+
+### 设计原则
+
+1. **目录架构统一**：root 和普通用户使用完全相同的目录结构（`$HOME/xx`）
+2. **代码极简化**：通过统一架构消除 if-else 判断，降低维护复杂度
+3. **服务管理分离**：root 使用系统级 systemd，普通用户使用用户级 systemd
+4. **权限简化**：不创建专用用户，不进行 chown 操作
+5. **日志统一**：所有用户日志统一存放在项目目录
+
+### 模式对比表
+
+**目录架构统一说明：** Root 用户和普通用户使用完全相同的目录结构，唯一的区别在于 `$HOME` 环境变量的值不同。
+
+| 项目 | Root 用户模式 | 普通用户模式 |
+|------|-------------|-------------|
+| **$HOME 值** | `/root` | `/home/username` |
+| **Prometheus 安装目录** | `$HOME/prometheus` → `/root/prometheus` | `$HOME/prometheus` → `/home/username/prometheus` |
+| **Prometheus 数据目录** | `$HOME/prometheus/data` | `$HOME/prometheus/data` |
+| **Prometheus 日志目录** | `$HOME/prometheus/logs` | `$HOME/prometheus/logs` |
+| **Prometheus 服务文件** | `/etc/systemd/system/prometheus.service` | `~/.config/systemd/user/prometheus.service` |
+| **Grafana 安装目录** | `$HOME/grafana` → `/root/grafana` | `$HOME/grafana` → `/home/username/grafana` |
+| **Grafana 数据目录** | `$HOME/grafana/data` | `$HOME/grafana/data` |
+| **Grafana 日志目录** | `$HOME/grafana/logs` | `$HOME/grafana/logs` |
+| **Grafana 配置目录** | `$HOME/grafana/conf` | `$HOME/grafana/conf` |
+| **Grafana 服务文件** | `/etc/systemd/system/grafana.service` | `~/.config/systemd/user/grafana.service` |
+| **InfluxDB 安装目录** | `$HOME/influxdb` → `/root/influxdb` | `$HOME/influxdb` → `/home/username/influxdb` |
+| **InfluxDB 数据目录** | `$HOME/influxdb/data` | `$HOME/influxdb/data` |
+| **InfluxDB 元数据目录** | `$HOME/influxdb/meta` | `$HOME/influxdb/meta` |
+| **InfluxDB 日志目录** | `$HOME/influxdb/logs` | `$HOME/influxdb/logs` |
+| **InfluxDB 配置目录** | `$HOME/influxdb/conf` | `$HOME/influxdb/conf` |
+| **InfluxDB 服务文件** | `/etc/systemd/system/influxdb.service` | `~/.config/systemd/user/influxdb.service` |
+| **Node Exporter 安装目录** | `$HOME/node_exporter` → `/root/node_exporter` | `$HOME/node_exporter` → `/home/username/node_exporter` |
+| **Node Exporter 二进制** | `$HOME/node_exporter/node_exporter` | `$HOME/node_exporter/node_exporter` |
+| **Node Exporter 服务文件** | `/etc/systemd/system/node_exporter.service` | `~/.config/systemd/user/node_exporter.service` |
+| **日志文件位置** | `./log/install.log`（项目目录） | `./log/install.log`（项目目录） |
+| **服务启动命令** | `systemctl start <service>` | `systemctl --user start <service>` |
+| **防火墙配置** | 自动配置（firewall-cmd/ufw） | 提示手动配置 |
+| **开机自启** | `systemctl enable`（自动） | 需手动配置 ~/.bash_profile |
+| **用户创建** | 不创建（使用 root） | 不创建（使用当前用户） |
+| **权限管理** | 无需 chown | 无需 chown |
+
+**关键优势：**
+- ✅ 代码极简：目录设置只需一行代码 `PROMETHEUS_INSTALL_DIR="$HOME/prometheus"`
+- ✅ 架构统一：root 和普通用户使用完全相同的目录结构
+- ✅ 易于维护：不需要维护两套路径逻辑
+
+### 实现模式
+
+采用统一目录架构后，安装脚本得到极大简化：
+
+**通用模式（所有组件统一）：**
+```bash
+# 统一设置路径（root 和普通用户使用相同结构）
+PROMETHEUS_INSTALL_DIR="$HOME/prometheus"
+PROMETHEUS_DATA_DIR="$HOME/prometheus/data"
+PROMETHEUS_LOG_DIR="$HOME/prometheus/logs"
+
+GRAFANA_INSTALL_DIR="$HOME/grafana"
+GRAFANA_DATA_DIR="$HOME/grafana/data"
+GRAFANA_LOG_DIR="$HOME/grafana/logs"
+GRAFANA_CONF_DIR="$HOME/grafana/conf"
+
+INFLUXDB_INSTALL_DIR="$HOME/influxdb"
+INFLUXDB_DATA_DIR="$HOME/influxdb/data"
+INFLUXDB_META_DIR="$HOME/influxdb/meta"
+INFLUXDB_LOG_DIR="$HOME/influxdb/logs"
+INFLUXDB_CONF_DIR="$HOME/influxdb/conf"
+
+NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"
+NODE_EXPORTER_BIN="$HOME/node_exporter/node_exporter"
+
+# 只在服务创建时需要判断用户类型
+create_systemd_service() {
+    if [ "$(id -u)" -eq 0 ]; then
+        create_system_service_file  # 系统级服务
+    else
+        create_user_service_file  # 用户级服务
+    fi
+}
+```
+
+**代码简化对比：**
+
+| 项目 | 之前（分离模式） | 现在（统一模式） |
+|------|----------------|----------------|
+| **路径设置代码行数** | ~30 行（if-else 判断） | ~10 行（直接赋值） |
+| **需要判断的次数** | 每个组件 2-3 次 | 仅服务创建时 1 次 |
+| **维护复杂度** | 高（两套路径） | 低（一套路径） |
+| **新增组件时** | 需复制所有 if-else 逻辑 | 只需定义目录变量 |
+
+### 真实场景应用
+
+**场景描述：**
+企业环境中，通常只有一台服务器，且只提供一个普通用户账号（无 sudo 权限，无 root 密码）。
+
+**解决方案：**
+1. 使用普通用户登录服务器
+2. 上传 PerfStackSuite 项目到用户目录
+3. 执行安装脚本，自动以普通用户模式安装
+4. 所有组件统一安装在家目录下：
+   - Prometheus: `$HOME/prometheus` → `/home/username/prometheus`
+   - Grafana: `$HOME/grafana` → `/home/username/grafana`
+   - InfluxDB: `$HOME/influxdb` → `/home/username/influxdb`
+   - Node Exporter: `$HOME/node_exporter` → `/home/username/node_exporter`
+5. 使用 `systemctl --user` 管理所有服务
+6. 服务在用户会话中运行，无需 root 权限
+7. 联系管理员开放防火墙端口（9090、3000、8086、9100）
+
+**Root 用户场景（如需要）：**
+1. 使用 root 用户登录服务器
+2. 执行相同的安装脚本
+3. 所有组件安装到 `/root` 目录下：
+   - Prometheus: `$HOME/prometheus` → `/root/prometheus`
+   - Grafana: `$HOME/grafana` → `/root/grafana`
+   - InfluxDB: `$HOME/influxdb` → `/root/influxdb`
+   - Node Exporter: `$HOME/node_exporter` → `/root/node_exporter`
+4. 使用 `systemctl` 管理所有服务（系统级）
+5. 自动配置防火墙规则
+
+**远程部署场景：**
+在多台服务器上部署 Node Exporter 时：
+1. 目标服务器自动使用统一的目录结构
+2. 根据目标服务器用户权限自动适配服务类型：
+   - root 目标服务器：系统级 systemd 服务
+   - 普通用户目标服务器：用户级 systemd 服务
+3. 所有成功部署的节点自动注册到 Prometheus
+4. 无需手动干预，完全自动化
+
+### 注意事项
+
+1. **Root 用户 /root 目录空间**：
+   - root 用户安装时，所有组件在 `/root` 目录下
+   - 某些系统 `/root` 分区空间较小（如 1GB）
+   - 建议在安装前检查 `/root` 分区空间：`df -h /root`
+   - 如空间不足，可以创建软链接：`ln -s /data/prometheus /root/prometheus`
+
+2. **用户级 systemd 前提条件**：
+   - 需要 systemd 版本 >= 232（支持用户级服务）
+   - 需要执行 `loginctl enable-linger` 使服务在用户登出后继续运行
+   - 或在 `~/.bash_profile` 中添加启动命令实现开机自启
+
+3. **防火墙配置**：
+   - 普通用户无法配置防火墙
+   - 需要联系管理员开放所需端口（9090、3000、8086、9100）
+   - 或使用其他端口转发方案
+
+4. **资源限制**：
+   - 普通用户模式下，进程受系统用户资源限制（ulimit）影响
+   - 必要时需要在 `/etc/security/limits.conf` 中调整限制
+
+5. **服务持久化**：
+   - root 用户：服务自动持久化，开机自启
+   - 普通用户：需配置 linger 或手动启动
+
+6. **Node Exporter 远程部署**：
+   - 目标服务器统一使用相同的目录结构
+   - 远程部署时需确保目标服务器允许 SSH 连接
+   - 根据目标服务器用户类型自动适配服务类型
+
+7. **端口冲突**：
+   - 普通用户模式下，如果端口被占用，需要手动停止占用进程
+   - 无法使用 `netstat -tulpn` 查看所有进程（需要 root）
+   - 可使用 `netstat -tupn` 或 `lsof -i:<port>` 查看当前用户的端口占用
 
 ## 开发注意事项
 
@@ -315,207 +540,222 @@ PerfStackSuite/
 
 ### 2. install_prometheus.sh（Prometheus 安装脚本）
 
-**功能说明：** 安装和配置 Prometheus 时序数据库。
+**功能说明：** 安装和配置 Prometheus 时序数据库，支持 root 用户和普通用户双模式安装，采用统一目录架构。
 
 **操作步骤：**
-1. 调用公共函数检查是否已安装 Prometheus
-2. 创建必要的目录结构：
-   - 安装目录：`/opt/prometheus`
-   - 数据目录：`/data/prometheus`
-   - 日志目录：`/var/log/prometheus`
-4. 从 `soft/` 目录解压 Prometheus 安装包到 `/opt/prometheus`
-5. 复制配置文件：
-   - 从 `config/prometheus.yml` 复制到安装目录
-   - 如配置文件不存在，则生成默认配置
-6. 配置数据存储路径（修改 prometheus.yml 中的 storage.tsdb.path）
-7. 配置数据保留时间：
-   - 设置 `--storage.tsdb.retention.time` 参数（从 deploy.conf 读取）
-   - 默认值：30d（30天）
-   - 支持格式：Xd（X天）、Xh（X小时）、Xw（X周）、Xy（X年）
-8. 配置抓取目标（添加 Node Exporter、InfluxDB 等抓取任务）
-9. 创建 systemd 服务文件 `/etc/systemd/system/prometheus.service`：
-   - 设置 ExecStart 指向 prometheus 二进制文件，包含 `--storage.tsdb.retention.time` 参数
-   - 配置重启策略为 always
-10. 重载 systemd 配置（systemctl daemon-reload）
-11. 启动 Prometheus 服务（systemctl start prometheus）
-12. 设置开机自启（systemctl enable prometheus）
-13. 检查服务状态和端口监听
-14. 验证：访问 http://localhost:9090 确认服务正常
-15. 输出安装结果信息，包括数据保留时间配置
+1. 设置统一路径（root 和普通用户使用相同结构）：
+   ```bash
+   PROMETHEUS_INSTALL_DIR="$HOME/prometheus"
+   PROMETHEUS_DATA_DIR="$HOME/prometheus/data"
+   PROMETHEUS_LOG_DIR="$HOME/prometheus/logs"
+   # root 用户：/root/prometheus, /root/prometheus/data, /root/prometheus/logs
+   # 普通用户：/home/username/prometheus, /home/username/prometheus/data, ...
+   ```
+2. 调用公共函数检查是否已安装 Prometheus
+3. 创建必要的目录结构（使用当前用户权限）
+4. 从 `soft/` 目录解压 Prometheus 安装包到安装目录
+5. 生成配置文件 `prometheus.yml`：
+   - 包含基本的全局配置（scrape_interval、evaluation_interval）
+   - 配置 Prometheus 自身监控（job_name: 'prometheus'）
+   - 预留 Node Exporter 自动发现配置
+6. 根据用户类型创建 systemd 服务：
+   - **root 用户**：创建系统级 systemd 服务（`/etc/systemd/system/prometheus.service`）
+   - **普通用户**：创建用户级 systemd 服务（`~/.config/systemd/user/prometheus.service`）
+7. 配置防火墙（仅 root 用户）：
+   - CentOS/麒麟：使用 `firewall-cmd` 开放 9090 端口
+   - Ubuntu/Debian：使用 `ufw allow` 开放 9090 端口
+   - 普通用户：提示需要手动配置防火墙或联系管理员
+8. 启动 Prometheus 服务：
+   - **root 用户**：`systemctl enable prometheus && systemctl start prometheus`
+   - **普通用户**：显示 `systemctl --user` 命令提示
+9. 验证安装：
+   - 检查 Prometheus 进程：`pgrep -f prometheus`
+   - 访问 Web UI：`http://localhost:9090`
+   - 验证端口监听：调用 `check_port` 函数
+10. 显示安装信息：
+    - 安装目录、数据目录、日志目录
+    - 服务端口（9090）
+    - 数据保留时间（默认 30d）
+    - Web UI 访问地址
+    - 服务管理命令（根据用户类型显示相应命令）
+
+**关键实现细节：**
+- 代码极简：路径设置只需一行代码 `PROMETHEUS_INSTALL_DIR="$HOME/prometheus"`
+- 不创建专用用户，使用当前用户运行
+- 不进行权限管理（chown），文件创建者即所有者
+- 配置文件自动生成，包含时间戳注释
+- 服务文件包含外部 URL（使用 `get_local_ip` 获取本机 IP）
 
 ---
 
 ### 3. install_grafana.sh（Grafana 安装脚本）
 
-**功能说明：** 安装和配置 Grafana 可视化平台，并预配置数据源。
+**功能说明：** 安装和配置 Grafana 可视化平台，支持 root 用户和普通用户双模式安装，采用统一目录架构，通过 Provisioning 自动配置数据源和仪表板。
 
 **操作步骤：**
-1. 调用公共函数检查是否已安装 Grafana
-2. 创建必要的目录结构：
-   - 安装目录：`/opt/grafana`
-   - 数据目录：`/data/grafana`
-   - 日志目录：`/var/log/grafana`
-   - 插件目录：`/data/grafana/plugins`
-   - 配置目录：`/etc/grafana`
-4. 从 `soft/` 目录解压 Grafana 安装包到 `/opt/grafana`
-5. 生成配置文件 `/etc/grafana/grafana.ini`：
+1. 设置统一路径（root 和普通用户使用相同结构）：
+   ```bash
+   GRAFANA_INSTALL_DIR="$HOME/grafana"
+   GRAFANA_DATA_DIR="$HOME/grafana/data"
+   GRAFANA_LOG_DIR="$HOME/grafana/logs"
+   GRAFANA_CONF_DIR="$HOME/grafana/conf"
+   # root 用户：/root/grafana, /root/grafana/data, ...
+   # 普通用户：/home/username/grafana, /home/username/grafana/data, ...
+   ```
+2. 调用公共函数检查是否已安装 Grafana
+3. 创建必要的目录结构（使用当前用户权限）
+4. 从 `soft/` 目录解压 Grafana 安装包到安装目录
+5. 生成配置文件 `grafana.ini`：
    - 设置服务器端口（默认 3000）
-   - 配置数据存储路径
-   - 配置日志路径
-   - 设置管理员账号（从 deploy.conf 读取）
-   - 配置 anonymous_enabled 以支持公共查看
-6. 创建 systemd 服务文件 `/etc/systemd/system/grafana.service`
-7. 重载并启动服务
-9. 等待 Grafana 启动完成（sleep 10-15 秒）
-10. 配置 Prometheus 数据源：
-    - 调用 Grafana API 创建数据源
-    - 设置类型为 Prometheus
-    - 设置 URL 为 http://localhost:9090
-    - 设置访问模式为 proxy
-11. 配置 InfluxDB 数据源：
-    - 调用 Grafana API 创建数据源
-    - 设置类型为 InfluxDB
-    - 设置 URL 为 http://localhost:8086
-    - 配置数据库名、用户名、密码
-12. 导入预置仪表板：
-    - 从 `config/dashboards/` 目录读取 JSON 文件
-    - 调用 Grafana API 导入仪表板
-    - 关联已配置的数据源
-13. 验证：访问 http://localhost:3000 确认服务正常
-14. 输出默认管理员账号和访问地址
+   - 配置数据存储路径、日志路径、插件目录、Provisioning 目录
+   - 设置管理员账号（从 deploy.conf 读取，默认 admin/admin123）
+6. 配置数据源 Provisioning（自动配置，无需 API 调用）：
+   - 创建 `provisioning/datasources/` 目录
+   - 生成 Prometheus 和 InfluxDB 数据源配置文件
+7. 配置仪表板 Provisioning（自动导入）：
+   - 创建 `provisioning/dashboards/` 目录
+   - 复制仪表板 JSON 文件到安装目录
+8. 根据用户类型创建 systemd 服务：
+   - **root 用户**：创建系统级 systemd 服务（`/etc/systemd/system/grafana.service`）
+   - **普通用户**：创建用户级 systemd 服务（`~/.config/systemd/user/grafana.service`）
+9. 配置防火墙（仅 root 用户）：
+   - CentOS/麒麟：使用 `firewall-cmd` 开放 3000 端口
+   - Ubuntu/Debian：使用 `ufw allow` 开放 3000 端口
+   - 普通用户：提示需要手动配置防火墙或联系管理员
+10. 启动 Grafana 服务：
+    - **root 用户**：`systemctl enable grafana && systemctl start grafana`
+    - **普通用户**：显示 `systemctl --user` 命令提示
+11. 验证安装：
+    - 检查 Grafana 进程：`pgrep -f grafana`
+    - 访问 Web UI：`http://localhost:3000`
+    - 验证数据源自动配置和仪表板导入
+12. 显示安装信息：
+    - 安装目录、数据目录、日志目录
+    - 服务端口（3000）
+    - Web UI 访问地址
+    - 默认管理员账号和密码
+    - 服务管理命令
+
+**关键实现细节：**
+- 代码极简：路径设置只需一行代码 `GRAFANA_INSTALL_DIR="$HOME/grafana"`
+- 使用 Grafana Provisioning 机制自动配置数据源和仪表板，无需 API 调用
+- 不创建专用用户，使用当前用户运行
+- 不进行权限管理（chown），文件创建者即所有者
+- 配置文件自动生成，包含时间戳注释
 
 ---
 
 ### 4. install_influxdb.sh（InfluxDB 安装脚本）
 
-**功能说明：** 安装和配置 InfluxDB 时序数据库，用于存储 JMeter 测试结果。
+**功能说明：** 安装和配置 InfluxDB 时序数据库，用于存储 JMeter 测试结果，支持 root 用户和普通用户双模式安装，采用统一目录架构。
 
 **操作步骤：**
-1. 调用公共函数检查是否已安装 InfluxDB
-2. 创建必要的目录结构：
-   - 安装目录：`/opt/influxdb`
-   - 数据目录：`/data/influxdb/data`
-   - 元数据目录：`/data/influxdb/meta`
-   - 日志目录：`/var/log/influxdb`
-4. 从 `soft/` 目录解压 InfluxDB 安装包到 `/opt/influxdb`
-5. 生成配置文件 `/etc/influxdb/influxdb.conf`：
+1. 设置统一路径（root 和普通用户使用相同结构）：
+   ```bash
+   INFLUXDB_INSTALL_DIR="$HOME/influxdb"
+   INFLUXDB_DATA_DIR="$HOME/influxdb/data"
+   INFLUXDB_META_DIR="$HOME/influxdb/meta"
+   INFLUXDB_LOG_DIR="$HOME/influxdb/logs"
+   INFLUXDB_CONF_DIR="$HOME/influxdb/conf"
+   # root 用户：/root/influxdb, /root/influxdb/data, ...
+   # 普通用户：/home/username/influxdb, /home/username/influxdb/data, ...
+   ```
+2. 调用公共函数检查是否已安装 InfluxDB
+3. 创建必要的目录结构（使用当前用户权限）
+4. 从 `soft/` 目录解压 InfluxDB 安装包到安装目录
+5. 生成配置文件 `influxdb.conf`：
    - 设置 HTTP 端口（默认 8086）
-   - 配置数据存储路径
    - 启用认证（auth-enabled = true）
-   - 配置日志级别
-   - 设置数据保留策略
-6. 创建 systemd 服务文件 `/etc/systemd/system/influxdb.service`
-7. 重载并启动服务
-9. 等待 InfluxDB 启动完成
-10. 初始化数据库和用户：
-    - 创建数据库 jmeter（用于存储测试结果）
-    - 创建管理员用户（用户名/密码从配置文件读取）
-    - 创建普通用户 jmeter_user
-    - 配置数据保留策略：
-      - 策略名：默认策略或自定义策略名
-      - 保留时间：从 deploy.conf 读取 INFLUXDB_RETENTION 参数
-      - 默认值：30d（30天）
-      - 支持格式：Xd（X天）、Xh（X小时）、Xw（X周）
-      - 副本数量：1（单节点环境）
-      - 设置为默认策略
-11. 验证：使用 influx 命令连接并执行 SHOW DATABASES
-12. 输出连接信息和数据库名称
+   - 配置数据存储路径、元数据路径、日志路径
+   - 设置日志级别（info）
+6. 根据用户类型创建 systemd 服务：
+   - **root 用户**：创建系统级 systemd 服务（`/etc/systemd/system/influxdb.service`）
+   - **普通用户**：创建用户级 systemd 服务（`~/.config/systemd/user/influxdb.service`）
+7. 配置防火墙（仅 root 用户）：
+   - CentOS/麒麟：使用 `firewall-cmd` 开放 8086 端口
+   - Ubuntu/Debian：使用 `ufw allow` 开放 8086 端口
+   - 普通用户：提示需要手动配置防火墙或联系管理员
+8. 启动 InfluxDB 服务：
+   - **root 用户**：`systemctl enable influxdb && systemctl start influxdb`
+   - **普通用户**：显示 `systemctl --user` 命令提示
+9. 初始化数据库和用户：
+   - 创建数据库 jmeter（用于存储测试结果）
+   - 创建管理员用户和普通用户 jmeter_user
+   - 配置数据保留策略（默认 30d）
+10. 验证安装：
+    - 检查 InfluxDB 进程：`pgrep -f influxdb`
+    - 使用 influx 命令连接并执行 SHOW DATABASES
+    - 验证端口监听：调用 `check_port` 函数
+11. 显示安装信息：
+    - 安装目录、数据目录、日志目录
+    - 服务端口（8086）
+    - 数据库名称（jmeter）
+    - 连接信息和管理员账号
+    - 服务管理命令
+    - 数据保留时间配置
+
+**关键实现细节：**
+- 代码极简：路径设置只需一行代码 `INFLUXDB_INSTALL_DIR="$HOME/influxdb"`
+- 不创建专用用户，使用当前用户运行
+- 不进行权限管理（chown），文件创建者即所有者
+- 配置文件自动生成，包含时间戳注释
+- 使用 InfluxDB CLI 或 API 进行初始化操作
 
 ---
 
 ### 5. install_node_exporter.sh（Node Exporter 安装脚本）
 
-**功能说明：** 在本地或远程目标服务器上安装 Node Exporter，采集系统指标，支持分布式部署。
+**功能说明：** 在本地或远程目标服务器上安装 Node Exporter，采集系统指标，支持分布式部署，采用统一目录架构。
 
 **操作步骤：**
 
-**本地安装模式：**
-1. 调用公共函数检查是否已安装 Node Exporter
-2. 从 `soft/` 目录解压 Node Exporter 到 `/opt/node_exporter`
-3. 将 node_exporter 二进制文件复制到 `/usr/local/bin/`（或创建软链接）
-4. 创建 systemd 服务文件 `/etc/systemd/system/node_exporter.service`：
-   - 设置 ExecStart=/usr/local/bin/node_exporter
-   - 可配置额外参数，如 --web.listen-address=:9100
-5. 重载并启动服务
-6. 检查服务状态
-7. 配置防火墙：
-   - CentOS：使用 firewall-cmd 开放 9100 端口
-   - Ubuntu：使用 ufw allow 9100
-8. 验证：访问 http://localhost:9100/metrics 确认指标正常输出
-9. 获取本机 IP 地址
-10. 将本机 IP 和端口添加到 Prometheus 配置文件的 scrape_configs 中
-11. 重启 Prometheus 使配置生效
-12. 输出安装信息和注册状态
-
-**远程部署模式（分布式）：**
-1. 读取目标服务器配置文件（`config/target_servers.conf`）：
-   - 服务器 IP/主机名列表
-   - SSH 端口、用户名、认证信息
-   - 服务器分组标签
-2. 验证 SSH 连接：
-   - 测试到每台服务器的 SSH 连通性
-   - 验证 SSH 认证（密钥或密码）
-3. 并发分发安装包：
-   - 使用 scp 将 node_exporter 安装包上传到目标服务器
-   - 上传到目标服务器的临时目录（如 /tmp/）
-   - 支持并发上传（可配置并发数，如 5 个并发）
-4. 远程执行安装：
-   - 通过 SSH 在目标服务器上执行安装命令
-   - 解压安装包到 `/opt/node_exporter`
-   - 创建 systemd 服务文件
-   - 启动并配置开机自启
-   - 配置防火墙规则
-   - 支持并发安装（使用后台任务或 xargs -P）
-5. 验证远程安装：
-   - 通过 curl/httpget 访问目标服务器的 9100 端口
-   - 验证 metrics 指标正常输出
-   - 检查 Node Exporter 服务状态
-6. 批量注册到 Prometheus：
-   - 收集所有目标服务器的 IP 地址
-   - 批量添加到 Prometheus 配置文件
-   - 根据 server_group 标签分组添加 job_name
+**本地安装（统一架构）：**
+1. 设置统一路径（root 和普通用户使用相同结构）：
+   ```bash
+   NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"
+   NODE_EXPORTER_BIN="$HOME/node_exporter/node_exporter"
+   # root 用户：/root/node_exporter, /root/node_exporter/node_exporter
+   # 普通用户：/home/username/node_exporter, ...
+   ```
+2. 调用公共函数检查是否已安装 Node Exporter
+3. 从 `soft/` 目录解压 Node Exporter 到安装目录
+4. 根据用户类型创建 systemd 服务：
+   - **root 用户**：创建系统级 systemd 服务（`/etc/systemd/system/node_exporter.service`）
+   - **普通用户**：创建用户级 systemd 服务（`~/.config/systemd/user/node_exporter.service`）
+5. 配置防火墙（仅 root 用户）：
+   - CentOS/麒麟：使用 `firewall-cmd` 开放 9100 端口
+   - Ubuntu/Debian：使用 `ufw allow` 开放 9100 端口
+   - 普通用户：提示需要手动配置防火墙或联系管理员
+6. 启动 Node Exporter 服务：
+   - **root 用户**：`systemctl enable node_exporter && systemctl start node_exporter`
+   - **普通用户**：显示 `systemctl --user` 命令提示
+7. 验证安装：
+   - 访问 http://localhost:9100/metrics 确认指标正常输出
+   - 检查 Node Exporter 进程：`pgrep -f node_exporter`
+   - 验证端口监听：调用 `check_port` 函数
+8. 注册到 Prometheus：
+   - 获取本机 IP 地址（调用 `get_local_ip` 函数）
+   - 将本机 IP 和端口添加到 Prometheus 配置文件
    - 重启 Prometheus 使配置生效
-7. 生成部署报告：
-   - 成功部署的服务器列表
-   - 失败的服务器列表及错误原因
-   - Prometheus 注册状态
-   - 提供重新部署失败服务器的选项
+9. 输出安装信息和注册状态
 
-**多服务器配置文件格式（target_servers.conf）：**
-```ini
-# 服务器分组
-[web_servers]
-server_group=web
-servers=192.168.1.10,192.168.1.11,192.168.1.12
-ssh_user=root
-ssh_port=22
-auth_type=key
-ssh_key_path=/root/.ssh/id_rsa
+**远程部署（分布式 + 统一架构）：**
+1. 读取目标服务器配置文件（`config/target_servers.conf`）
+2. 验证 SSH 连接并检测目标服务器用户类型
+3. 并发分发安装包到目标服务器
+4. 远程执行安装（使用统一路径结构）
+5. 根据目标服务器用户类型自动适配服务类型：
+   - root 目标服务器：系统级 systemd 服务
+   - 普通用户目标服务器：用户级 systemd 服务
+6. 验证远程安装并批量注册到 Prometheus
+7. 生成部署报告（成功/失败列表）
 
-[db_servers]
-server_group=db
-servers=192.168.1.20,192.168.1.21
-ssh_user=root
-ssh_port=22
-auth_type=password
-ssh_password=your_password
-
-# 或简化格式
-192.168.1.30|root|22|key|/root/.ssh/id_rsa|app_server
-192.168.1.31|root|22|password|your_password|app_server
-```
-
-**并发控制：**
-- 默认并发数：5 台服务器同时部署
-- 可通过配置文件调整并发数量
-- 支持失败重试机制
-- 超时控制（默认每台服务器 10 分钟超时）
-
-**错误处理：**
-- SSH 连接失败：记录并跳过，继续部署其他服务器
-- SCP 传输失败：重试 3 次
-- 远程安装失败：记录详细错误日志
-- 部分失败时提供清理选项或回滚机制
+**关键实现细节：**
+- 代码极简：路径设置只需一行代码 `NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"`
+- 远程部署时目标服务器使用相同的目录结构
+- 根据目标服务器用户类型自动适配服务类型
+- 不创建专用用户，使用当前连接用户运行
+- 不进行权限管理（chown），文件创建者即所有者
 
 ---
 
@@ -789,10 +1029,14 @@ ssh_password=your_password
 **包含内容：**
 
 **常量定义：**
-- 脚本根目录
-- 安装包目录
-- 配置文件目录
-- 日志文件路径
+- 脚本根目录（SCRIPT_DIR）
+- 项目目录（PROJECT_DIR）
+- 安装包目录（SOFT_DIR）
+- 配置文件目录（CONFIG_DIR）
+- **日志文件路径（LOG_FILE）**：统一使用 `${PROJECT_DIR}/log/install.log`
+  - root 用户和普通用户都将日志存放在项目目录中
+  - 避免普通用户无权限写入 `/var/log/` 目录
+  - 自动创建日志目录
 - 颜色输出常量（RED、GREEN、YELLOW）
 
 **日志函数：**
@@ -895,13 +1139,16 @@ ssh_password=your_password
 
 ```ini
 # 基础配置
-INSTALL_BASE_DIR=/opt
-DATA_BASE_DIR=/data
-LOG_BASE_DIR=/var/log
+# 采用统一目录架构：root 和普通用户都使用 $HOME/xx 结构
+# root 用户：$HOME = /root，安装到 /root/prometheus, /root/grafana 等
+# 普通用户：$HOME = /home/username，安装到 /home/username/prometheus 等
+INSTALL_BASE_DIR=$HOME
+DATA_BASE_DIR=$HOME/data
+LOG_BASE_DIR=$HOME/log
 
 # 组件版本和安装包
-PROMETHEUS_VERSION=2.45.0
-GRAFANA_VERSION=10.1.0
+PROMETHEUS_VERSION=3.5.1
+GRAFANA_VERSION=12.3.2
 INFLUXDB_VERSION=2.7.4
 NODE_EXPORTER_VERSION=1.6.1
 JDK_VERSION=8u381
@@ -957,9 +1204,16 @@ SSH_CONNECT_TIMEOUT=30
 SCP_RETRY_COUNT=3
 
 # 日志配置
-LOG_FILE=/var/log/perfstacksuite/install.log
+LOG_FILE=./log/install.log
 LOG_LEVEL=INFO
 ```
+
+**配置说明：**
+- **INSTALL_BASE_DIR=$HOME**：统一使用 $HOME，root 为 /root，普通用户为 /home/username
+- **DATA_BASE_DIR=$HOME/data**：数据统一在 $HOME/data 下
+- **LOG_FILE=./log/install.log**：日志统一存放在项目目录
+- **代码简化**：所有组件路径设置只需一行代码，无需 if-else 判断
+- **自动适配**：$HOME 环境变量自动适配 root 和普通用户场景
 
 ### target_servers.conf 配置文件示例
 
