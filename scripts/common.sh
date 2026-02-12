@@ -14,7 +14,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SOFT_DIR="${PROJECT_DIR}/soft"
 CONFIG_DIR="${PROJECT_DIR}/config"
-LOG_FILE="/var/log/perfstacksuite/install.log"
+
+# 统一使用项目目录存放日志
+LOG_FILE="${PROJECT_DIR}/log/install.log"
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
 # 颜色输出常量
 RED='\033[0;31m'
@@ -182,12 +185,6 @@ wait_for_port() {
 # 环境预检查
 check_environment() {
     log_info "开始环境检查..."
-
-    # 检查是否为 root 用户
-    if ! is_root; then
-        log_error "请使用 root 用户执行此脚本"
-        exit 1
-    fi
 
     # 检查操作系统类型
     local os_type=$(get_os_type)
