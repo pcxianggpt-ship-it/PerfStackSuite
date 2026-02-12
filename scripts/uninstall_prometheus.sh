@@ -16,11 +16,23 @@ source "${SCRIPT_DIR}/common.sh"
 # 常量定义
 # ============================================
 
-PROMETHEUS_VERSION="${PROMETHEUS_VERSION:-2.45.0}"
+PROMETHEUS_VERSION="${PROMETHEUS_VERSION:-3.5.1}"
 PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
-PROMETHEUS_INSTALL_DIR="${INSTALL_BASE_DIR}/prometheus"
-PROMETHEUS_DATA_DIR="${DATA_BASE_DIR}/prometheus"
-PROMETHEUS_LOG_DIR="/var/log/prometheus"
+
+# 检测是否为 root 用户，设置不同的安装路径
+if [ "$(id -u)" -eq 0 ]; then
+    # root 用户安装到系统目录
+    PROMETHEUS_INSTALL_DIR="${INSTALL_BASE_DIR}/prometheus"
+    PROMETHEUS_DATA_DIR="${DATA_BASE_DIR}/prometheus"
+    PROMETHEUS_LOG_DIR="/var/log/prometheus"
+    IS_ROOT_INSTALL=true
+else
+    # 普通用户安装到用户目录
+    PROMETHEUS_INSTALL_DIR="$HOME/prometheus"
+    PROMETHEUS_DATA_DIR="$HOME/prometheus/data"
+    PROMETHEUS_LOG_DIR="$HOME/prometheus/logs"
+    IS_ROOT_INSTALL=false
+fi
 
 # ============================================
 # 显示卸载信息
