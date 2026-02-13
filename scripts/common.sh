@@ -274,8 +274,31 @@ install_grafana() {
 }
 
 install_influxdb() {
-    log_info "InfluxDB 安装功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local influxdb_script="${script_dir}/install_influxdb.sh"
+
+    if [ ! -f "$influxdb_script" ]; then
+        log_error "InfluxDB 安装脚本不存在: $influxdb_script"
+        return 1
+    fi
+
+    log_info "开始安装 InfluxDB..."
+    bash "$influxdb_script"
+    return $?
+}
+
+uninstall_influxdb() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local influxdb_script="${script_dir}/uninstall_influxdb.sh"
+
+    if [ ! -f "$influxdb_script" ]; then
+        log_error "InfluxDB 卸载脚本不存在: $influxdb_script"
+        return 1
+    fi
+
+    log_info "开始卸载 InfluxDB..."
+    bash "$influxdb_script"
+    return $?
 }
 
 install_node_exporter() {
@@ -312,30 +335,21 @@ install_chinese_fonts() {
 # 卸载函数（后续实现）
 # ============================================
 
-uninstall_grafana() {
+install_influxdb() {
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local grafana_script="${script_dir}/uninstall_grafana.sh"
+    local influxdb_script="${script_dir}/install_influxdb.sh"
 
-    if [ ! -f "$grafana_script" ]; then
-        log_error "Grafana 卸载脚本不存在: $grafana_script"
+    if [ ! -f "$influxdb_script" ]; then
+        log_error "InfluxDB 安装脚本不存在: $influxdb_script"
         return 1
     fi
 
-    log_info "开始卸载 Grafana..."
-    bash "$grafana_script"
+    log_info "开始安装 InfluxDB..."
+    bash "$influxdb_script"
     return $?
 }
 
-uninstall_influxdb() {
-    log_info "InfluxDB 卸载功能开发中..."
-    return 1
-}
-
-uninstall_node_exporter() {
-    log_info "Node Exporter 卸载功能开发中..."
-    return 1
-}
-
+# InfluxDB 和 Node Exporter 卸载功能开发中
 uninstall_jdk() {
     log_info "JDK 卸载功能开发中..."
     return 1

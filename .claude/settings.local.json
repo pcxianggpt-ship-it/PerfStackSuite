@@ -5,7 +5,11 @@
       "Bash(chmod:*)",
       "Bash(find:*)",
       "Bash(xargs:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(dos2unix:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(tar:*)"
     ],
     "deny": [],
     "ask": []
