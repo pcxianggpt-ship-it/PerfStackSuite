@@ -91,10 +91,14 @@ PerfStackSuite 是一个自动化部署压测工具及监控工具套件，旨�
   - 支持批量部署和并行安装
   - 目标服务器统一使用相同目录结构
   - 远程服务器自动适配 systemd 服务类型
+  - **优先验证 Metrics 端点**：检查 `http://远程IP:9100/metrics` 是否可访问
+  - **智能安装判断**：根据 Metrics 端点状态决定是否安装
+  - **传输服务文件**：将安装包和 systemd 服务文件传输到远程服务器
+  - **systemctl 管理服务**：使用 systemctl 启动远程 Node Exporter 服务
 - 采集系统级指标（CPU、内存、磁盘、网络等）
 - 默认端口：9100
 - 自动注册到 Prometheus 抓取目标
-- 支持目标服务器列表配置
+- 支持目标服务器列表配置（在 `config/deploy.conf` 的 `TARGET_SERVERS` 数组中配置）
 - **无专用用户创建**：使用当前用户（root 或普通用户）直接运行
 - **无权限管理**：不进行 chown 等权限操作，文件创建者即所有者
 
@@ -222,13 +226,23 @@ Node Exporter 采集指标 → Prometheus 抓取 ────┘
 - 认证信息
 
 ### 目标服务器配置
-- 服务器 IP/主机名列表
-- SSH 端口（默认 22）
-- SSH 认证方式（密钥/密码）
-- SSH 用户名和密码/密钥路径
-- 组件部署选择（Node Exporter、JMeter 等）
-- 服务器分组标签（如：web-server、db-server）
-- 并发部署数量限制
+- **配置文件位置**：`config/deploy.conf`
+- **配置方式**：在 `TARGET_SERVERS` 数组中配置服务器信息
+- **配置格式**：`server_name,ip_address,user,port[,password]`
+- **认证方式**：
+  - SSH 密钥认证（推荐）：`server_name,192.168.1.100,user,22`
+  - SSH 密码认证（需 sshpass）：`server_name,192.168.1.101,user,22,password`
+- **配置示例**：
+  ```bash
+  TARGET_SERVERS=(
+      "web-01,192.168.1.100,deployer,22"
+      "web-02,192.168.1.101,deployer,22,mypassword"
+      "app-01,192.168.1.102,deployer,22"
+  )
+  ```
+- **服务器类型检测**：自动检测目标服务器用户类型（root/普通用户）并适配服务类型
+- **并发部署限制**：通过 `DEPLOY_PARALLEL_NUM` 配置并发数量（默认 5）
+- **SSH 连接超时**：通过 `SSH_CONNECT_TIMEOUT` 配置连接超时（默认 30秒）
 
 ## 实现技术
 
@@ -446,8 +460,7 @@ PerfStackSuite/
 │   ├── grafana.ini            # Grafana 配置文件模板
 │   ├── grafana-datasource.yml # Grafana 数据源配置
 │   ├── influxdb.conf          # InfluxDB 配置文件模板
-│   ├── deploy.conf            # 部署配置文件
-│   ├── target_servers.conf    # 目标服务器列表配置（用于远程部署）
+│   ├── deploy.conf            # 部署配置文件（包含 TARGET_SERVERS 数组）
 │   └── dashboards/            # Grafana 监控面板模板
 │       ├── node-exporter-dashboard.json
 │       ├── prometheus-dashboard.json
@@ -740,15 +753,35 @@ PerfStackSuite/
 9. 输出安装信息和注册状态
 
 **远程部署（分布式 + 统一架构）：**
-1. 读取目标服务器配置文件（`config/target_servers.conf`）
+1. 从配置文件读取目标服务器列表（`config/deploy.conf` 中的 `TARGET_SERVERS` 数组）
 2. 验证 SSH 连接并检测目标服务器用户类型
-3. 并发分发安装包到目标服务器
-4. 远程执行安装（使用统一路径结构）
-5. 根据目标服务器用户类型自动适配服务类型：
-   - root 目标服务器：系统级 systemd 服务
-   - 普通用户目标服务器：用户级 systemd 服务
-6. 验证远程安装并批量注册到 Prometheus
-7. 生成部署报告（成功/失败列表）
+3. **优先验证 Metrics 端点**：
+   - 执行 `curl http://远程IP:9100/metrics` 检查是否可访问
+   - HTTP 200：已安装并运行 → 跳过安装，注册到 Prometheus
+   - 不可访问：继续检查进程状态
+4. **智能安装判断**：
+   - 进程运行但 metrics 不可访问：提示重新部署
+   - 已安装但未运行：询问是否启动服务
+   - 未安装：执行完整安装流程
+5. **传输安装文件**：
+   - 通过 SCP 传输 Node Exporter 安装包到 `/tmp/node_exporter_install/`
+   - 根据目标服务器用户类型生成 systemd 服务文件：
+     - root 用户：系统级服务文件（`/etc/systemd/system/node_exporter.service`）
+     - 普通用户：用户级服务文件（`~/.config/systemd/user/node_exporter.service`）
+   - 传输服务文件到远程服务器
+6. **远程执行安装**：
+   - 解压安装包到 `$HOME/node_exporter/bin/`
+   - 安装 systemd 服务文件并启用开机自启
+   - 使用 systemctl 启动 Node Exporter 服务：
+     - root 用户：`systemctl start node_exporter`
+     - 普通用户：`systemctl --user start node_exporter`
+7. **验证安装**：
+   - 检查 Metrics 端点是否可访问（`curl http://远程IP:9100/metrics`）
+   - 验证服务运行状态
+8. **注册到 Prometheus**：
+   - 添加远程节点 IP:9100 到本地 Prometheus 配置
+   - 重启 Prometheus 使配置生效
+9. 生成部署报告（成功/失败列表）
 
 **关键实现细节：**
 - 代码极简：路径设置只需一行代码 `NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"`
@@ -756,6 +789,10 @@ PerfStackSuite/
 - 根据目标服务器用户类型自动适配服务类型
 - 不创建专用用户，使用当前连接用户运行
 - 不进行权限管理（chown），文件创建者即所有者
+- **优先验证 Metrics 端点**：避免重复安装已运行的服务
+- **智能安装判断**：根据 Metrics 端点状态决定安装策略
+- **传输服务文件**：本地生成 systemd 服务文件并传输到远程服务器
+- **systemctl 管理服务**：使用标准 systemctl 命令管理远程服务
 
 ---
 
@@ -1197,11 +1234,21 @@ SOFT_DIR=./soft
 CONFIG_DIR=./config
 
 # 远程部署配置
-TARGET_SERVERS_CONFIG=./config/target_servers.conf
 DEPLOY_PARALLEL_NUM=5
 DEPLOY_TIMEOUT=600
 SSH_CONNECT_TIMEOUT=30
 SCP_RETRY_COUNT=3
+
+# 远程服务器列表
+# 格式：server_name,ip_address,user,port[,password]
+# 示例：
+# TARGET_SERVERS=(
+#   "web-01,192.168.1.100,deployer,22"
+#   "web-02,192.168.1.101,deployer,22,mypassword"
+#   "app-01,192.168.1.102,deployer,22"
+# )
+TARGET_SERVERS=(
+)
 
 # 日志配置
 LOG_FILE=./log/install.log
@@ -1214,43 +1261,5 @@ LOG_LEVEL=INFO
 - **LOG_FILE=./log/install.log**：日志统一存放在项目目录
 - **代码简化**：所有组件路径设置只需一行代码，无需 if-else 判断
 - **自动适配**：$HOME 环境变量自动适配 root 和普通用户场景
-
-### target_servers.conf 配置文件示例
-
-```ini
-# 远程部署目标服务器配置文件
-# 格式：IP|SSH用户|SSH端口|认证类型|认证信息|服务器分组
-
-# 认证类型：key（密钥）或 password（密码）
-# 服务器分组：用于 Prometheus 的 job_name 分类
-
-# 示例 1：使用 SSH 密钥认证
-192.168.1.10|root|22|key|/root/.ssh/id_rsa|web_servers
-192.168.1.11|root|22|key|/root/.ssh/id_rsa|web_servers
-
-# 示例 2：使用密码认证
-192.168.1.20|root|22|password|your_password|db_servers
-192.168.1.21|root|22|password|your_password|db_servers
-
-# 示例 3：使用非标准 SSH 端口
-192.168.1.30|deploy|2222|key|/home/deploy/.ssh/id_rsa|app_servers
-
-# 示例 4：INI 格式（可选）
-[web_servers]
-server_group=web
-servers=192.168.1.10,192.168.1.11,192.168.1.12
-ssh_user=root
-ssh_port=22
-auth_type=key
-ssh_key_path=/root/.ssh/id_rsa
-
-[db_servers]
-server_group=db
-servers=192.168.1.20,192.168.1.21
-ssh_user=root
-ssh_port=22
-auth_type=password
-ssh_password=your_password
-```
 
 ---
