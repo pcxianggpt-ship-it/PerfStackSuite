@@ -718,81 +718,93 @@ PerfStackSuite/
 
 ### 5. install_node_exporter.sh（Node Exporter 安装脚本）
 
-**功能说明：** 在本地或远程目标服务器上安装 Node Exporter，采集系统指标，支持分布式部署，采用统一目录架构。
+**功能说明：** 在远程目标服务器上批量安装 Node Exporter，采集系统指标，支持分布式部署，采用统一目录架构。
 
-**操作步骤：**
+**部署流程（极简5步法）：**
 
-**本地安装（统一架构）：**
-1. 设置统一路径（root 和普通用户使用相同结构）：
-   ```bash
-   NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"
-   NODE_EXPORTER_BIN="$HOME/node_exporter/node_exporter"
-   # root 用户：/root/node_exporter, /root/node_exporter/node_exporter
-   # 普通用户：/home/username/node_exporter, ...
-   ```
-2. 调用公共函数检查是否已安装 Node Exporter
-3. 从 `soft/` 目录解压 Node Exporter 到安装目录
-4. 根据用户类型创建 systemd 服务：
-   - **root 用户**：创建系统级 systemd 服务（`/etc/systemd/system/node_exporter.service`）
-   - **普通用户**：创建用户级 systemd 服务（`~/.config/systemd/user/node_exporter.service`）
-5. 配置防火墙（仅 root 用户）：
-   - CentOS/麒麟：使用 `firewall-cmd` 开放 9100 端口
-   - Ubuntu/Debian：使用 `ufw allow` 开放 9100 端口
-   - 普通用户：提示需要手动配置防火墙或联系管理员
-6. 启动 Node Exporter 服务：
-   - **root 用户**：`systemctl enable node_exporter && systemctl start node_exporter`
-   - **普通用户**：显示 `systemctl --user` 命令提示
-7. 验证安装：
-   - 访问 http://localhost:9100/metrics 确认指标正常输出
-   - 检查 Node Exporter 进程：`pgrep -f node_exporter`
-   - 验证端口监听：调用 `check_port` 函数
-8. 注册到 Prometheus：
-   - 获取本机 IP 地址（调用 `get_local_ip` 函数）
-   - 将本机 IP 和端口添加到 Prometheus 配置文件
-   - 重启 Prometheus 使配置生效
-9. 输出安装信息和注册状态
+1. **验证安装状态**：
+   - 从配置文件读取目标服务器列表（`config/deploy.conf` 中的 `TARGET_SERVERS` 数组）
+   - 对每台服务器执行 `curl -s http://IP:9100/metrics --connect-timeout 3`
+   - HTTP 200 响应：已安装并运行 → 跳过安装，记录为已部署
+   - 连接失败或非 200：标记为待安装服务器
 
-**远程部署（分布式 + 统一架构）：**
-1. 从配置文件读取目标服务器列表（`config/deploy.conf` 中的 `TARGET_SERVERS` 数组）
-2. 验证 SSH 连接并检测目标服务器用户类型
-3. **优先验证 Metrics 端点**：
-   - 执行 `curl http://远程IP:9100/metrics` 检查是否可访问
-   - HTTP 200：已安装并运行 → 跳过安装，注册到 Prometheus
-   - 不可访问：继续检查进程状态
-4. **智能安装判断**：
-   - 进程运行但 metrics 不可访问：提示重新部署
-   - 已安装但未运行：询问是否启动服务
-   - 未安装：执行完整安装流程
-5. **传输安装文件**：
-   - 通过 SCP 传输 Node Exporter 安装包到 `/tmp/node_exporter_install/`
-   - 根据目标服务器用户类型生成 systemd 服务文件：
-     - root 用户：系统级服务文件（`/etc/systemd/system/node_exporter.service`）
-     - 普通用户：用户级服务文件（`~/.config/systemd/user/node_exporter.service`）
-   - 传输服务文件到远程服务器
-6. **远程执行安装**：
-   - 解压安装包到 `$HOME/node_exporter/bin/`
-   - 安装 systemd 服务文件并启用开机自启
-   - 使用 systemctl 启动 Node Exporter 服务：
+2. **配置免密登录**（针对待安装服务器）：
+   - 测试 SSH 免密登录：`ssh -o BatchMode=yes -o ConnectTimeout=5 user@host echo test`
+   - 如果测试成功：已配置免密登录 → 跳过此步骤
+   - 如果测试失败：执行密钥配置
+     - 检查本地是否有 SSH 密钥（`~/.ssh/id_rsa`）
+     - 如无密钥则生成：`ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""`
+     - 复制公钥到目标服务器：
+       - 优先使用 sshpass：`sshpass -p password ssh-copy-id -o StrictHostKeyChecking=no user@host`
+       - 否则使用 expect 自动输入密码
+       - 或提示用户手动输入密码执行 `ssh-copy-id`
+     - 再次测试免密登录确认成功
+
+3. **分发安装包**：
+   - 检查本地 `soft/` 目录是否存在 Node Exporter 安装包（`node_exporter-*.linux-amd64.tar.gz`）
+   - 通过 SCP 分发安装包到待安装服务器：
+     - 使用免密登录复制：`scp -o StrictHostKeyChecking=no soft/node_exporter-*.tar.gz user@host:/tmp/`
+   - 验证传输成功：检查远程 `/tmp/` 目录是否存在安装包
+
+4. **配置 systemd 服务**：
+   - SSH 登录到目标服务器执行安装
+   - 解压安装包到统一目录：`mkdir -p $HOME/node_exporter && tar -xzf /tmp/node_exporter-*.tar.gz -C $HOME/node_exporter/ --strip-components=1`
+   - 根据用户类型创建 systemd 服务文件：
+     - **root 用户**：创建系统级服务 `/etc/systemd/system/node_exporter.service`
+       ```ini
+       [Unit]
+       Description=Node Exporter
+       After=network.target
+
+       [Service]
+       Type=simple
+       ExecStart=/root/node_exporter/node_exporter
+       Restart=always
+       RestartSec=3
+
+       [Install]
+       WantedBy=multi-user.target
+       ```
+     - **普通用户**：创建用户级服务 `~/.config/systemd/user/node_exporter.service`
+       ```ini
+       [Unit]
+       Description=Node Exporter
+       After=network.target
+
+       [Service]
+       Type=simple
+       ExecStart=%h/node_exporter/node_exporter
+       Restart=always
+       RestartSec=3
+
+       [Install]
+       WantedBy=default.target
+       ```
+   - 重载 systemd 配置：
+     - root 用户：`systemctl daemon-reload`
+     - 普通用户：`systemctl --user daemon-reload`（需设置 XDG_RUNTIME_DIR）
+   - 启用开机自启：
+     - root 用户：`systemctl enable node_exporter`
+     - 普通用户：`systemctl --user enable node_exporter`（需 `loginctl enable-linger`）
+   - 启动服务：
      - root 用户：`systemctl start node_exporter`
      - 普通用户：`systemctl --user start node_exporter`
-7. **验证安装**：
-   - 检查 Metrics 端点是否可访问（`curl http://远程IP:9100/metrics`）
-   - 验证服务运行状态
-8. **注册到 Prometheus**：
-   - 添加远程节点 IP:9100 到本地 Prometheus 配置
-   - 重启 Prometheus 使配置生效
-9. 生成部署报告（成功/失败列表）
+
+5. **验证安装结果**：
+   - 检查 metrics 端点：`curl -s http://IP:9100/metrics --connect-timeout 3`
+   - HTTP 200 响应：安装成功 → 记录到成功列表
+   - 失败：记录到失败列表，显示错误信息
+   - 生成部署报告，显示成功/失败的服务器列表
 
 **关键实现细节：**
 - 代码极简：路径设置只需一行代码 `NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"`
-- 远程部署时目标服务器使用相同的目录结构
-- 根据目标服务器用户类型自动适配服务类型
 - 不创建专用用户，使用当前连接用户运行
 - 不进行权限管理（chown），文件创建者即所有者
 - **优先验证 Metrics 端点**：避免重复安装已运行的服务
-- **智能安装判断**：根据 Metrics 端点状态决定安装策略
-- **传输服务文件**：本地生成 systemd 服务文件并传输到远程服务器
-- **systemctl 管理服务**：使用标准 systemctl 命令管理远程服务
+- **自动配置免密登录**：优先使用 sshpass，支持 expect 自动输入密码
+- **统一目录结构**：所有服务器使用相同的安装目录结构
+- **systemd 标准管理**：区分 root 和普通用户的服务管理方式
+- **批量部署错误隔离**：单台服务器失败不影响其他服务器的安装
 
 ---
 
