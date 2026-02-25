@@ -302,8 +302,17 @@ uninstall_influxdb() {
 }
 
 install_node_exporter() {
-    log_info "Node Exporter 安装功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local node_exporter_script="${script_dir}/install_node_exporter.sh"
+
+    if [ ! -f "$node_exporter_script" ]; then
+        log_error "Node Exporter 安装脚本不存在: $node_exporter_script"
+        return 1
+    fi
+
+    log_info "开始安装 Node Exporter（远程部署模式）..."
+    bash "$node_exporter_script" "$@"
+    return $?
 }
 
 install_jdk() {

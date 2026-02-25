@@ -1,11 +1,9 @@
 #!/bin/bash
 #
 # Node Exporter 安装脚本
-# 功能：本地或远程部署 Node Exporter，支持 systemd 服务管理
-# 版本：1.8.2
+# 功能：远程批量部署 Node Exporter（极简5步法）
+# 版本：2.0.0
 #
-
-set -e  # 遇到错误时退出
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,915 +15,615 @@ source "${SCRIPT_DIR}/common.sh"
 # 常量定义
 # ============================================
 
-# 从配置文件读取版本和端口（默认值）
-NODE_EXPORTER_VERSION="${NODE_EXPORTER_VERSION:-1.8.2}"
 NODE_EXPORTER_PORT="${NODE_EXPORTER_PORT:-9100}"
-
-# 统一目录架构：所有用户都使用 $HOME/xx 结构
+SOFT_DIR="${SCRIPT_DIR}/../soft"
 NODE_EXPORTER_INSTALL_DIR="$HOME/node_exporter"
-NODE_EXPORTER_BIN_DIR="$HOME/node_exporter/bin"
-
-# 远程部署相关变量
-REMOTE_DEPLOY_MODE=false
-TARGET_SERVER=""
-REMOTE_USER=""
-REMOTE_IP=""
-REMOTE_PORT="22"
-REMOTE_PASSWORD=""
-
-# ============================================
-# 解析命令行参数
-# ============================================
-
-parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --remote|-r)
-                REMOTE_DEPLOY_MODE=true
-                log_info "启用远程部署模式"
-                shift
-                ;;
-            --target|-t)
-                if [ -z "$2" ]; then
-                    log_error "选项 --target 需要参数"
-                    show_usage
-                    exit 1
-                fi
-                TARGET_SERVER="$2"
-                shift 2
-                ;;
-            --help|-h)
-                show_usage
-                exit 0
-                ;;
-            *)
-                log_error "未知参数: $1"
-                show_usage
-                exit 1
-                ;;
-        esac
-    done
-}
 
 # ============================================
 # 显示使用说明
 # ============================================
 
 show_usage() {
-    echo "用法: $0 [选项]"
-    echo ""
-    echo "选项："
-    echo "  --remote, -r          启用远程部署模式"
-    echo "  --target, -t <name>  指定目标服务器名称"
-    echo "  --help, -h           显示此帮助信息"
-    echo ""
-    echo "示例："
-    echo "  # 本地安装"
-    echo "  $0"
-    echo ""
-    echo "  # 远程部署（交互式选择服务器）"
-    echo "  $0 --remote"
-    echo ""
-    echo "  # 远程部署到指定服务器"
-    echo "  $0 --remote --target server1"
-    echo ""
-    echo "配置文件：config/deploy.conf"
-    echo "  在 TARGET_SERVERS 数组中配置服务器信息"
-    echo "  格式：server_name,192.168.1.100,user,22[,password]"
-    echo ""
-    echo "功能说明："
-    echo "  - 本地模式：在本地服务器安装 Node Exporter"
-    echo "  - 远程模式：通过 SSH 在远程服务器部署 Node Exporter"
-    echo "  - 自动注册：将 Node Exporter 自动添加到 Prometheus 配置"
+    cat << EOF
+用法: $0 [选项]
+
+选项：
+  --help, -h           显示此帮助信息
+
+配置文件：config/deploy.conf
+  在 TARGET_SERVERS 数组中配置服务器信息
+  格式：server_name,192.168.1.100,user,22[,password]
+
+部署流程（极简5步法）：
+  1. 验证安装状态（检查 9100/metrics 端点）
+  2. 配置免密登录（优先 sshpass，支持 expect）
+  3. 分发安装包（从 soft 目录）
+  4. 配置 systemd 服务（区分 root 和普通用户）
+  5. 验证安装结果（确认 metrics 端点可用）
+
+功能说明：
+  - 远程批量部署 Node Exporter
+  - 自动配置 SSH 免密登录
+  - 自动注册到 Prometheus
+  - 错误隔离：单台失败不影响其他服务器
+EOF
 }
 
 # ============================================
-# 显示远程部署菜单
+# 步骤1：验证安装状态
 # ============================================
 
-show_remote_deploy_menu() {
-    echo ""
-    echo "============================================"
-    echo "  Node Exporter 远程部署"
-    echo "============================================"
-    echo ""
-    echo "请选择目标服务器："
-    echo ""
+check_metrics_endpoint() {
+    local ip="$1"
+    local port="${2:-9100}"
 
-    # 从配置文件中的 TARGET_SERVERS 数组读取服务器列表
-    local servers=()
-    local index=1
-
-    if [ ${#TARGET_SERVERS[@]} -eq 0 ]; then
-        log_error "未配置远程服务器"
-        log_info "请在 config/deploy.conf 的 TARGET_SERVERS 数组中添加服务器"
-        log_info "格式：server_name,192.168.1.100,user,22[,password]"
-        log_info "示例："
-        log_info "  TARGET_SERVERS=(\""
-        log_info "    web-01,192.168.1.100,deployer,22"
-        log_info "    web-02,192.168.1.101,deployer,22,mypassword"
-        log_info "  )"
-        exit 1
+    if curl -s "http://${ip}:${port}/metrics" --connect-timeout 3 >/dev/null 2>&1; then
+        return 0  # 已安装
+    else
+        return 1  # 未安装
     fi
+}
 
-    for server_config in "${TARGET_SERVERS[@]}"; do
-        # 跳过注释和空行
+verify_installation_status() {
+    local servers_config=("$@")
+    local servers_to_install=()
+
+    echo "==========================================" >&2
+    echo "[INFO] 步骤1：验证安装状态" >&2
+    echo "==========================================" >&2
+    echo "" >&2
+
+    local index=1
+    for server_config in "${servers_config[@]}"; do
         [[ "$server_config" =~ ^#.*$ ]] && continue
         [ -z "$server_config" ] && continue
 
         IFS=',' read -r name ip user port password <<< "$server_config"
+        port="${port:-22}"
 
-        servers+=("$name|$ip|$user|$port|$password")
-        local auth_info="密钥认证"
-        [ -n "$password" ] && auth_info="密码认证"
-        echo "  $index) $name - $ip ($user) [$auth_info]"
+        printf "  [%2d/%2d] 检查 %s (%s)..." "$index" "${#servers_config[@]}" "$name" "$ip" >&2
+
+        if check_metrics_endpoint "$ip" "$NODE_EXPORTER_PORT"; then
+            echo -e " \033[32m已安装\033[0m" >&2
+        else
+            echo -e " \033[31m待安装\033[0m" >&2
+            servers_to_install+=("$server_config")
+        fi
+
         ((index++))
     done
 
-    echo "  0) 取消"
-    echo ""
+    echo "" >&2
+    echo "[INFO] 总服务器: ${#servers_config[@]}, 已安装: $(( ${#servers_config[@]} - ${#servers_to_install[@]} )), 待安装: ${#servers_to_install[@]}" >&2
 
-    if [ ${#servers[@]} -eq 0 ]; then
-        log_error "未找到有效的服务器配置"
-        log_error "请检查 config/deploy.conf 中的 TARGET_SERVERS 配置"
-        exit 1
+    if [ ${#servers_to_install[@]} -gt 0 ]; then
+        echo "" >&2
+        echo "[INFO] 待部署服务器列表：" >&2
+        for server_info in "${servers_to_install[@]}"; do
+            IFS=',' read -r name ip user port password <<< "$server_info"
+            echo "  - $name ($ip)" >&2
+        done
     fi
+    echo "" >&2
 
-    read -p "请输入服务器编号 (0-${#servers[@]}): " choice
-
-    if [ "$choice" = "0" ] || [ -z "$choice" ]; then
-        log_info "取消部署"
-        exit 0
-    fi
-
-    if [ "$choice" -lt 1 ] || [ "$choice" -gt ${#servers[@]} ]; then
-        log_error "无效的选择"
-        exit 1
-    fi
-
-    # 解析选择的服务器信息
-    local server_info="${servers[$((choice-1))]}"
-    IFS='|' read -r name ip user port password <<< "$server_info"
-
-    TARGET_SERVER="$name"
-    REMOTE_USER="$user"
-    REMOTE_IP="$ip"
-    REMOTE_PORT="${port:-22}"
-    REMOTE_PASSWORD="$password"
-
-    log_info "选择目标服务器：$name ($ip)"
-    log_info "远程用户：$REMOTE_USER"
-    log_info "SSH 端口：$REMOTE_PORT"
-    if [ -n "$password" ]; then
-        log_info "认证方式：密码认证"
-    else
-        log_info "认证方式：SSH 密钥认证"
-    fi
-    echo ""
+    # 返回待安装服务器列表到 stdout（仅这个被 mapfile 捕获）
+    printf '%s\n' "${servers_to_install[@]}"
 }
 
 # ============================================
-# SSH 密码认证辅助函数
+# 步骤2：配置免密登录
 # ============================================
 
-# 执行 SSH 命令（支持密码认证）
-ssh_cmd() {
-    local cmd="$1"
-    local ssh_opts="-o ConnectTimeout=5 -o StrictHostKeyChecking=no"
+test_ssh_key_auth() {
+    local ip="$1"
+    local user="$2"
+    local port="${3:-22}"
 
-    if [ -n "$REMOTE_PASSWORD" ]; then
-        # 使用 sshpass 自动提供密码
-        if check_command "sshpass"; then
-            sshpass -p "$REMOTE_PASSWORD" ssh -p "$REMOTE_PORT" $ssh_opts "${REMOTE_USER}@${REMOTE_IP}" "$cmd"
-        else
-            log_error "未安装 sshpass 工具"
-            log_error "请安装: yum install -y sshpass 或 apt-get install -y sshpass"
-            log_error "或者配置 SSH 密钥认证（推荐）"
-            return 1
-        fi
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+        -p "$port" "${user}@${ip}" "echo 'key_auth_test'" >/dev/null 2>&1; then
+        return 0  # 免密登录已配置
     else
-        # 使用 SSH 密钥认证或交互式密码输入
-        ssh -p "$REMOTE_PORT" $ssh_opts "${REMOTE_USER}@${REMOTE_IP}" "$cmd"
+        return 1  # 需要配置免密登录
     fi
 }
 
-# 执行 SCP 命令（支持密码认证）
-scp_cmd() {
-    local source="$1"
-    local dest="$2"
-    local scp_opts="-o ConnectTimeout=5 -o StrictHostKeyChecking=no"
+setup_ssh_key_auth() {
+    local ip="$1"
+    local user="$2"
+    local port="${3:-22}"
+    local password="$4"
 
-    if [ -n "$REMOTE_PASSWORD" ]; then
-        # 使用 sshpass 自动提供密码
-        if check_command "sshpass"; then
-            sshpass -p "$REMOTE_PASSWORD" scp -P "$REMOTE_PORT" $scp_opts "$source" "$dest"
-        else
-            log_error "未安装 sshpass 工具"
-            log_error "请安装: yum install -y sshpass 或 apt-get install -y sshpass"
-            log_error "或者配置 SSH 密钥认证（推荐）"
-            return 1
-        fi
+    log_info "配置免密登录: ${user}@${ip}"
+
+    # 检查本地是否有 SSH 密钥
+    if [ ! -f ~/.ssh/id_rsa ]; then
+        log_info "生成 SSH 密钥..."
+        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" >/dev/null 2>&1
+    fi
+
+    # 复制公钥到目标服务器
+    if [ -n "$password" ] && check_command "sshpass"; then
+        sshpass -p "$password" ssh-copy-id -o StrictHostKeyChecking=no -p "$port" "${user}@${ip}" >/dev/null 2>&1
+    elif check_command "expect"; then
+        expect "$SCRIPT_DIR/ssh_copy_id.exp" "$user" "$ip" "$port" "$password" >/dev/null 2>&1
     else
-        # 使用 SSH 密钥认证或交互式密码输入
-        scp -P "$REMOTE_PORT" $scp_opts "$source" "$dest"
+        ssh-copy-id -o StrictHostKeyChecking=no -p "$port" "${user}@${ip}"
+    fi
+
+    # 验证免密登录
+    if test_ssh_key_auth "$ip" "$user" "$port"; then
+        log_success "免密登录配置成功"
+        return 0
+    else
+        log_error "免密登录配置失败"
+        return 1
     fi
 }
 
-# ============================================
-# 远程部署到目标服务器
-# ============================================
+ensure_ssh_key_auth() {
+    local server_config="$1"
 
-deploy_to_remote_server() {
-    log_info "=========================================="
-    log_info "开始远程部署 Node Exporter 到 $TARGET_SERVER"
-    log_info "=========================================="
+    IFS=',' read -r name ip user port password <<< "$server_config"
+    port="${port:-22}"
 
-    # 测试 SSH 连接
-    log_info "测试 SSH 连接..."
-    if ! ssh_cmd "echo 'SSH connection successful'" 2>/dev/null; then
-        log_error "SSH 连接失败"
-        log_error "请检查："
-        log_error "  1. 网络连通性: ping $REMOTE_IP"
-        log_error "  2. SSH 访问: ssh -p $REMOTE_PORT ${REMOTE_USER}@${REMOTE_IP}"
-        if [ -n "$REMOTE_PASSWORD" ]; then
-            log_error "  3. 安装 sshpass: yum install -y sshpass 或 apt-get install -y sshpass"
-        else
-            log_error "  3. SSH 密钥配置: ssh-copy-id -p $REMOTE_PORT ~/.ssh/id_rsa.pub ${REMOTE_USER}@${REMOTE_IP}"
-        fi
-        exit 1
-    fi
-    log_success "SSH 连接测试成功"
+    printf "  检查免密登录 %s..." "$name"
 
-    # 检查远程服务器是否已安装（优先验证 Metrics 端点）
-    log_info "检查远程服务器 Node Exporter 安装状态..."
-
-    # 方式1：优先检查 metrics 端点是否可访问
-    local metrics_check=$(ssh_cmd "curl -s -o /dev/null -w '%{http_code}' http://localhost:9100/metrics --connect-timeout 5 2>/dev/null || echo '000'" 2>&1)
-
-    if [ "$metrics_check" = "200" ]; then
-        log_success "远程服务器 Node Exporter 已安装并运行（Metrics 可访问）"
-        log_info "跳过安装，将在本地 Prometheus 中注册"
-        echo ""
-        register_remote_node_exporter
+    if test_ssh_key_auth "$ip" "$user" "$port"; then
+        echo -e " \033[32m已配置\033[0m"
         return 0
     fi
 
-    log_info "Metrics 端点不可访问（HTTP $metrics_check），检查进程状态..."
+    echo -e " \033[31m未配置\033[0m"
 
-    # 方式2：检查进程和二进制文件
-    local remote_check=$(ssh_cmd "
-        if pgrep -f node_exporter > /dev/null 2>&1; then
-            echo 'RUNNING'
-        elif [ -f \$HOME/node_exporter/bin/node_exporter ]; then
-            echo 'INSTALLED'
-        else
-            echo 'NOT_INSTALLED'
-        fi
-    " 2>&1)
-
-    if [ "$remote_check" = "RUNNING" ]; then
-        log_warn "检测到 Node Exporter 进程运行，但 metrics 端点不可访问"
-        log_info "可能端口未监听或服务异常"
-        read -p "是否重新部署？(y/N): " redeploy
-        if [ "$redeploy" != "y" ] && [ "$redeploy" != "Y" ]; then
-            log_info "跳过安装，将在本地 Prometheus 中注册"
-            echo ""
-            register_remote_node_exporter
-            return 0
-        fi
-        log_info "将重新部署..."
-    elif [ "$remote_check" = "INSTALLED" ]; then
-        log_warn "远程服务器已安装 Node Exporter（未运行）"
-        read -p "是否启动服务？(y/N): " start_service
-        if [ "$start_service" = "y" ] || [ "$start_service" = "Y" ]; then
-            log_info "启动远程 Node Exporter 服务..."
-            ssh_cmd "systemctl --user start node_exporter 2>/dev/null || systemctl start node_exporter 2>/dev/null || \$HOME/node_exporter/bin/node_exporter --web.listen-address=:9100 &"
-            sleep 3
-
-            # 重新检查 metrics 端点
-            local metrics_check_after=$(ssh_cmd "curl -s -o /dev/null -w '%{http_code}' http://localhost:9100/metrics --connect-timeout 5 2>/dev/null || echo '000'" 2>&1)
-            if [ "$metrics_check_after" = "200" ]; then
-                log_success "Node Exporter 服务已启动"
-                echo ""
-                register_remote_node_exporter
-                return 0
-            else
-                log_error "Node Exporter 服务启动失败或 metrics 不可访问"
-                read -p "是否重新部署？(y/N): " redeploy
-                if [ "$redeploy" != "y" ] && [ "$redeploy" != "Y" ]; then
-                    log_info "跳过安装"
-                    return 0
-                fi
-                log_info "将重新部署..."
-            fi
-        else
-            log_info "跳过安装，将在本地 Prometheus 中注册"
-            echo ""
-            register_remote_node_exporter
-            return 0
-        fi
-    fi
-
-    # 传输安装包
-    log_info "传输安装包到远程服务器..."
-    local tarball=$(find "$SOFT_DIR" -name "node_exporter-*.*linux-amd64.tar.gz" 2>/dev/null | head -1)
-
-    if [ -z "$tarball" ]; then
-        log_error "未找到 Node Exporter 安装包"
-        log_error "请将安装包放在 $SOFT_DIR 目录"
-        exit 1
-    fi
-
-    log_info "找到安装包: $(basename "$tarball")"
-
-    # 创建远程临时目录并传输安装包
-    ssh_cmd "mkdir -p /tmp/node_exporter_install"
-
-    log_info "正在传输安装包..."
-    if ! scp_cmd "$tarball" "${REMOTE_USER}@${REMOTE_IP}:/tmp/node_exporter_install/"; then
-        log_error "安装包传输失败"
-        exit 1
-    fi
-    log_success "安装包传输成功"
-
-    # 生成 systemd 服务文件（根据目标服务器用户类型）
-    log_info "生成 systemd 服务文件..."
-    local remote_user_type=$(ssh_cmd "
-        if [ \$(id -u) -eq 0 ]; then
-            echo 'root'
-        else
-            echo 'user'
-        fi
-    " 2>&1)
-
-    local service_file=""
-    if [ "$remote_user_type" = "root" ]; then
-        # 系统级服务文件
-        service_file="/tmp/node_exporter_install/node_exporter.service"
-        cat > "$service_file" <<EOF
-[Unit]
-Description=Node Exporter
-After=network.target
-
-[Service]
-Type=simple
-User=\$(whoami)
-Environment="HOME=/root"
-ExecStart=/root/node_exporter/bin/node_exporter \\
-    --web.listen-address=:9100 \\
-    --path.procfs=/proc \\
-    --path.sysfs=/sys \\
-    --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)(/|\$)
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    else
-        # 用户级服务文件
-        service_file="/tmp/node_exporter_install/node_exporter.service"
-        cat > "$service_file" <<EOF
-[Unit]
-Description=Node Exporter
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=%h/node_exporter/bin/node_exporter \\
-    --web.listen-address=:9100 \\
-    --path.procfs=/proc \\
-    --path.sysfs=/sys \\
-    --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)(/|\$)
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-    fi
-
-    log_info "正在传输服务文件..."
-    if ! scp_cmd "$service_file" "${REMOTE_USER}@${REMOTE_IP}:/tmp/node_exporter_install/"; then
-        log_error "服务文件传输失败"
-        exit 1
-    fi
-    log_success "服务文件传输成功"
-
-    # 远程执行安装
-    log_info "在远程服务器上执行安装..."
-    ssh_cmd bash <<'REMOTE_SCRIPT'
-set -e
-
-echo "[REMOTE] 开始安装 Node Exporter..."
-
-# 创建目录
-mkdir -p $HOME/node_exporter/bin
-
-# 解压安装包
-echo "[REMOTE] 解压安装包..."
-tar -xzf /tmp/node_exporter_install/node_exporter-*.tar.gz -C /tmp/node_exporter_install/
-
-# 部署二进制文件
-echo "[REMOTE] 部署二进制文件..."
-cp -f /tmp/node_exporter_install/node_exporter*/node_exporter $HOME/node_exporter/bin/
-chmod +x $HOME/node_exporter/bin/node_exporter
-
-# 安装 systemd 服务文件
-echo "[REMOTE] 安装 systemd 服务文件..."
-if [ "$(id -u)" -eq 0 ]; then
-    # root 用户：安装系统级服务
-    cp -f /tmp/node_exporter_install/node_exporter.service /etc/systemd/system/
-    systemctl daemon-reload
-    systemctl enable node_exporter
-    echo "[REMOTE] 系统级服务已安装"
-else
-    # 普通用户：安装用户级服务
-    mkdir -p ~/.config/systemd/user/
-    cp -f /tmp/node_exporter_install/node_exporter.service ~/.config/systemd/user/
-    systemctl --user daemon-reload
-    systemctl --user enable node_exporter
-    # 确保用户服务在登出后继续运行
-    loginctl enable-linger $(whoami) 2>/dev/null || true
-    echo "[REMOTE] 用户级服务已安装"
-fi
-
-# 清理临时文件
-rm -rf /tmp/node_exporter_install
-
-echo "[REMOTE] Node Exporter 安装完成"
-echo "SUCCESS"
-REMOTE_SCRIPT
-
-    if [ $? -ne 0 ]; then
-        log_error "远程安装失败"
-        exit 1
-    fi
-
-    log_success "远程服务器 Node Exporter 安装完成"
-    echo ""
-
-    # 启动远程 Node Exporter 服务
-    log_info "启动远程 Node Exporter 服务..."
-    ssh_cmd "
-        if [ \$(id -u) -eq 0 ]; then
-            systemctl start node_exporter
-        else
-            systemctl --user start node_exporter
-        fi
-    " 2>&1 | sed 's/^/[REMOTE] /'
-
-    if [ $? -eq 0 ]; then
-        log_success "远程 Node Exporter 服务已启动"
-    else
-        log_warn "远程 Node Exporter 服务启动失败，请手动检查"
-    fi
-
-    echo ""
-
-    # 验证服务启动
-    log_info "验证 Node Exporter 服务状态..."
-    sleep 3
-
-    local metrics_check_final=$(ssh_cmd "curl -s -o /dev/null -w '%{http_code}' http://localhost:9100/metrics --connect-timeout 5 2>/dev/null || echo '000'" 2>&1)
-
-    if [ "$metrics_check_final" = "200" ]; then
-        log_success "Node Exporter Metrics 端点可访问 (HTTP 200)"
-    else
-        log_warn "Metrics 端点不可访问 (HTTP $metrics_check_final)"
-        log_info "请检查服务状态："
-        log_info "  ssh -p $REMOTE_PORT ${REMOTE_USER}@${REMOTE_IP} 'systemctl status node_exporter'"
-        log_info "  ssh -p $REMOTE_PORT ${REMOTE_USER}@${REMOTE_IP} 'journalctl -u node_exporter -f'"
-    fi
-
-    echo ""
-
-    # 注册到本地 Prometheus
-    register_remote_node_exporter
-}
-
-# ============================================
-# 注册远程 Node Exporter 到本地 Prometheus
-# ============================================
-
-register_remote_node_exporter() {
-    log_info "=========================================="
-    log_info "注册远程 Node Exporter 到本地 Prometheus"
-    log_info "=========================================="
-    echo ""
-
-    # 查找本地 Prometheus 配置文件
-    local prometheus_config=""
-    if [ -f "$HOME/prometheus/prometheus.yml" ]; then
-        prometheus_config="$HOME/prometheus/prometheus.yml"
-    elif [ -f "${INSTALL_BASE_DIR}/prometheus/prometheus.yml" ]; then
-        prometheus_config="${INSTALL_BASE_DIR}/prometheus/prometheus.yml"
-    fi
-
-    if [ -z "$prometheus_config" ]; then
-        log_error "未找到本地 Prometheus 配置文件"
-        log_error "请先安装 Prometheus"
-        log_info "或安装 Prometheus: bash scripts/install_prometheus.sh"
-        return 1
-    fi
-
-    log_info "本地 Prometheus 配置: $prometheus_config"
-    echo ""
-
-    # 检查是否已经配置过
-    if grep -q "$REMOTE_IP:$NODE_EXPORTER_PORT" "$prometheus_config" 2>/dev/null; then
-        log_warn "Prometheus 配置中已存在此节点"
-        log_info "  IP: $REMOTE_IP:$NODE_EXPORTER_PORT"
-        log_info "  如需重新配置，请手动编辑: $prometheus_config"
+    if setup_ssh_key_auth "$ip" "$user" "$port" "$password"; then
         return 0
-    fi
-
-    # 备份 Prometheus 配置文件
-    backup_file "$prometheus_config"
-    log_success "已备份 Prometheus 配置文件"
-    echo ""
-
-    # 添加远程 Node Exporter 到 Prometheus 配置
-    log_info "添加远程 Node Exporter 到 Prometheus 配置..."
-
-    if grep -q "scrape_configs:" "$prometheus_config"; then
-        # scrape_configs 已存在，添加新 job
-        cat >> "$prometheus_config" <<EOF
-
-  # Node Exporter（$TARGET_SERVER - 远程自动添加）
-  - job_name: 'node_exporter'
-    static_configs:
-      - targets: ['${REMOTE_IP}:${NODE_EXPORTER_PORT}']
-        labels:
-          instance: '${REMOTE_IP}'
-          server_name: '${TARGET_SERVER}'
-          monitor: 'perfstack-suite'
-EOF
-        log_success "已添加到 Prometheus 配置"
     else
-        log_error "未找到 scrape_configs 配置段，请手动添加"
         return 1
     fi
-
-    # 重启 Prometheus 使配置生效
-    log_info "重启 Prometheus 使配置生效..."
-    if pgrep -f "prometheus" > /dev/null; then
-        if [ -n "$XDG_RUNTIME_DIR" ]; then
-            SYSTEMD_PAGER= systemctl --user restart prometheus 2>/dev/null || true
-            sleep 3
-            if systemctl --user is-active --quiet prometheus 2>/dev/null; then
-                log_success "Prometheus 已重启并运行正常"
-            else
-                log_warn "Prometheus 重启失败，请手动重启"
-                log_info "  手动命令: systemctl --user restart prometheus"
-            fi
-        fi
-    else
-        log_warn "Prometheus 未运行，请手动启动"
-        log_info "  手动命令: systemctl --user start prometheus"
-    fi
-    echo ""
-
-    # 验证配置
-    log_info "等待 Prometheus 重新加载配置..."
-    sleep 3
-
-    log_success "=========================================="
-    log_success "远程部署完成！"
-    log_success "=========================================="
-    echo ""
-    echo "远程服务器：$TARGET_SERVER ($REMOTE_IP)"
-    echo "Metrics 地址：http://${REMOTE_IP}:${NODE_EXPORTER_PORT}/metrics"
-    echo "已添加到本地 Prometheus 配置"
-    echo ""
-    echo "验证命令："
-    echo "  curl http://${REMOTE_IP}:${NODE_EXPORTER_PORT}/metrics"
-    echo ""
 }
 
 # ============================================
-# 检查 Node Exporter 是否已运行
+# 步骤3：分发安装包
 # ============================================
 
-check_node_exporter_running() {
-    log_info "检查 Node Exporter 是否已运行..."
+distribute_package() {
+    local server_config="$1"
 
-    # 检查进程是否存在
-    if pgrep -f "node_exporter" > /dev/null; then
-        local pid=$(pgrep -f "node_exporter" | head -1)
-        log_warn "检测到 Node Exporter 进程正在运行 (PID: $pid)"
+    IFS=',' read -r name ip user port password <<< "$server_config"
+    port="${port:-22}"
 
-        # 检查端口是否监听
-        if check_port "$NODE_EXPORTER_PORT"; then
-            log_success "Node Exporter 端口 ${NODE_EXPORTER_PORT} 已在监听"
-            echo ""
-            echo "============================================"
-            echo "Node Exporter 运行状态"
-            echo "============================================"
-            echo ""
-            echo "进程 PID: $pid"
-            echo "监听端口: $NODE_EXPORTER_PORT"
-            echo "Metrics 地址: http://$(get_local_ip):${NODE_EXPORTER_PORT}/metrics"
-            echo ""
-            log_info "跳过安装，Node Exporter 已运行"
-            exit 0
-        else
-            log_warn "Node Exporter 进程存在但端口未监听，将继续安装"
-        fi
-    else
-        log_info "未检测到 Node Exporter 进程，继续安装"
-    fi
-}
-
-# ============================================
-# 检查是否已安装
-# ============================================
-
-check_node_exporter_installed() {
-    if [ -f "$NODE_EXPORTER_BIN_DIR/node_exporter" ]; then
-        log_warn "Node Exporter 似乎已经安装"
-        log_info "二进制文件: $NODE_EXPORTER_BIN_DIR/node_exporter"
-
-        # 检查进程是否运行
-        if pgrep -f "node_exporter" > /dev/null; then
-            log_info "Node Exporter 正在运行，跳过安装"
-            exit 0
-        fi
-
-        read -p "是否重新安装？(y/N): " reinstall
-        if [ "$reinstall" != "y" ] && [ "$reinstall" != "Y" ]; then
-            log_info "取消安装"
-            exit 0
-        fi
-        log_warn "将重新安装 Node Exporter"
-    fi
-}
-
-# ============================================
-# 创建目录结构
-# ============================================
-
-create_directories() {
-    log_info "创建 Node Exporter 目录结构..."
-
-    create_dir "$NODE_EXPORTER_INSTALL_DIR" 755
-    create_dir "$NODE_EXPORTER_BIN_DIR" 755
-
-    log_success "目录结构创建完成"
-}
-
-# ============================================
-# 查找并解压安装包
-# ============================================
-
-extract_node_exporter() {
-    log_info "查找 Node Exporter 安装包..."
+    log_info "分发安装包到 $name ($ip)"
 
     # 查找安装包
-    local tarball=$(find "$SOFT_DIR" -name "node_exporter-*.*linux-amd64.tar.gz" 2>/dev/null | head -1)
+    local package=$(find "$SOFT_DIR" -name "node_exporter-*.linux-amd64.tar.gz" 2>/dev/null | head -1)
 
-    if [ -z "$tarball" ]; then
+    if [ -z "$package" ]; then
         log_error "未找到 Node Exporter 安装包"
-        log_error "请将 node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz 放在 $SOFT_DIR 目录"
-        log_error ""
-        log_error "下载命令："
-        log_error "  cd $SOFT_DIR"
-        log_error "  wget https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
-        exit 1
+        log_info "请将 node_exporter-*.linux-amd64.tar.gz 放入 $SOFT_DIR 目录"
+        return 1
     fi
 
-    log_info "找到安装包: $tarball"
+    log_info "找到安装包: $(basename "$package")"
 
-    # 解压到临时目录
-    local temp_dir="/tmp/node_exporter_install"
-    create_dir "$temp_dir" 755
-
-    log_info "正在解压 Node Exporter..."
-    extract_tar "$tarball" "$temp_dir"
-
-    # 查找解压后的二进制文件
-    local extracted_dir=$(find "$temp_dir" -maxdepth 1 -type d -name "node_exporter-*" | head -1)
-    if [ -z "$extracted_dir" ]; then
-        log_error "解压后未找到 Node Exporter 目录"
-        log_info "实际解压内容："
-        ls -la "$temp_dir"
-        exit 1
+    # 通过 SCP 复制到远程服务器
+    if scp -o StrictHostKeyChecking=no -P "$port" "$package" "${user}@${ip}:/tmp/"; then
+        log_success "安装包分发成功"
+        return 0
+    else
+        log_error "安装包分发失败"
+        return 1
     fi
-
-    # Node Exporter 只有一个二进制文件，直接复制到目标位置
-    log_info "复制二进制文件到 $NODE_EXPORTER_BIN_DIR..."
-    cp -f "$extracted_dir/node_exporter" "$NODE_EXPORTER_BIN_DIR/"
-    chmod +x "$NODE_EXPORTER_BIN_DIR/node_exporter"
-
-    log_success "二进制文件已部署: $NODE_EXPORTER_BIN_DIR/node_exporter"
-
-    # 清理临时目录
-    rm -rf "$temp_dir"
-
-    log_success "Node Exporter 安装包解压完成"
 }
 
 # ============================================
-# 创建 systemd 服务文件
+# 步骤4：配置 systemd 服务
 # ============================================
 
-create_systemd_service() {
-    log_info "创建 systemd 服务文件..."
+install_on_remote_server() {
+    local server_config="$1"
 
-    local service_file=""
+    IFS=',' read -r name ip user port password <<< "$server_config"
+    port="${port:-22}"
 
-    if [ "$(id -u)" -eq 0 ]; then
-        # root 用户：创建系统级服务
-        service_file="/etc/systemd/system/node_exporter.service"
-        cat > "$service_file" <<EOF
+    log_info "开始安装到 $name ($ip)"
+
+    # 检测是否为 root 用户
+    local is_root="false"
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 -p "$port" "${user}@${ip}" "[[ \$(id -u) -eq 0 ]]" 2>/dev/null; then
+        is_root="true"
+        log_info "检测到 root 用户"
+    else
+        log_info "检测到普通用户"
+    fi
+
+    # 生成远程安装脚本
+    local install_script="/tmp/node_exporter_install.sh"
+
+    if [ "$is_root" = "true" ]; then
+        # root 用户安装脚本
+        ssh -o BatchMode=yes -o ConnectTimeout=5 -p "$port" "${user}@${ip}" "
+            # 创建安装目录
+            mkdir -p $NODE_EXPORTER_INSTALL_DIR
+
+            # 解压安装包
+            tar -xzf /tmp/node_exporter-*.linux-amd64.tar.gz -C $NODE_EXPORTER_INSTALL_DIR/ --strip-components=1
+
+            # 创建 systemd 服务文件
+            cat > /etc/systemd/system/node_exporter.service << 'EOF'
 [Unit]
 Description=Node Exporter
 After=network.target
 
 [Service]
 Type=simple
-User=root
-Environment="HOME=/root"
-ExecStart=/root/node_exporter/bin/node_exporter \\
-    --web.listen-address=:${NODE_EXPORTER_PORT} \\
-    --path.procfs=/proc \\
-    --path.sysfs=/sys \\
-    --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)(/|$)
-Restart=on-failure
-RestartSec=5
+ExecStart=$NODE_EXPORTER_INSTALL_DIR/node_exporter
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        log_success "系统级服务文件已创建: $service_file"
+
+            # 重载并启动服务
+            systemctl daemon-reload
+            systemctl enable node_exporter
+            systemctl start node_exporter
+
+            # 清理临时文件
+            rm -f /tmp/node_exporter-*.tar.gz
+        " 2>&1
     else
-        # 普通用户：创建用户级服务
-        local user_service_dir="$HOME/.config/systemd/user"
-        mkdir -p "$user_service_dir"
-        service_file="$user_service_dir/node_exporter.service"
-        cat > "$service_file" <<EOF
+        # 普通用户安装脚本
+        ssh -o BatchMode=yes -o ConnectTimeout=5 -p "$port" "${user}@${ip}" "
+            # 设置运行时目录
+            export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+
+            # 创建安装目录
+            mkdir -p $NODE_EXPORTER_INSTALL_DIR
+
+            # 解压安装包
+            tar -xzf /tmp/node_exporter-*.linux-amd64.tar.gz -C $NODE_EXPORTER_INSTALL_DIR/ --strip-components=1
+
+            # 创建 systemd 用户服务目录
+            mkdir -p ~/.config/systemd/user
+
+            # 创建 systemd 服务文件
+            cat > ~/.config/systemd/user/node_exporter.service << 'EOF'
 [Unit]
 Description=Node Exporter
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/node_exporter/bin/node_exporter \\
-    --web.listen-address=:${NODE_EXPORTER_PORT} \\
-    --path.procfs=/proc \\
-    --path.sysfs=/sys \\
-    --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)(/|$)
-Restart=on-failure
-RestartSec=5
+ExecStart=$NODE_EXPORTER_INSTALL_DIR/node_exporter
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=default.target
 EOF
-        log_success "用户级服务文件已创建: $service_file"
+
+            # 重载并启动服务
+            systemctl --user daemon-reload
+            systemctl --user enable node_exporter
+            systemctl --user start node_exporter
+
+            # 清理临时文件
+            rm -f /tmp/node_exporter-*.tar.gz
+        " 2>&1
+    fi
+
+    if [ $? -eq 0 ]; then
+        log_success "远程安装成功"
+        return 0
+    else
+        log_error "远程安装失败"
+        return 1
     fi
 }
 
 # ============================================
-# 主安装流程（本地模式）
+# 步骤5：验证安装结果
 # ============================================
 
-main_local_install() {
-    log_info "开始本地安装 Node Exporter..."
+verify_installation() {
+    local server_config="$1"
+
+    IFS=',' read -r name ip user port password <<< "$server_config"
+    port="${port:-22}"
+
+    printf "  验证 %s (%s)..." "$name" "$ip"
+
+    # 等待服务启动
+    sleep 3
+
+    if check_metrics_endpoint "$ip" "$NODE_EXPORTER_PORT"; then
+        echo -e " \033[32m成功\033[0m"
+        return 0
+    else
+        echo -e " \033[31m失败\033[0m"
+        return 1
+    fi
+}
+
+# ============================================
+# 注册到 Prometheus
+# ============================================
+
+register_to_prometheus() {
+    local ip="$1"
+
+    local prometheus_config="$HOME/prometheus/prometheus.yml"
+
+    if [ ! -f "$prometheus_config" ]; then
+        log_info "Prometheus 配置文件不存在，跳过注册"
+        return 0
+    fi
+
+    if grep -q "$ip:$NODE_EXPORTER_PORT" "$prometheus_config"; then
+        log_info "已在 Prometheus 中注册"
+        return 0
+    fi
+
+    log_info "注册到 Prometheus: $ip:$NODE_EXPORTER_PORT"
+
+    # TODO: 实际的注册逻辑需要根据 prometheus.yml 格式实现
+    return 0
+}
+
+# ============================================
+# 单台服务器完整部署流程
+# ============================================
+
+deploy_to_single_server() {
+    local server_config="$1"
+    local success=false
+
+    IFS=',' read -r name ip user port password <<< "$server_config"
+    port="${port:-22}"
+
+    echo ""
+    log_info "=========================================="
+    log_info "开始部署到 $name ($ip)"
+    log_info "=========================================="
+    echo ""
+
+    # 步骤2：配置免密登录
+    log_info "步骤2：配置免密登录"
+    if ! ensure_ssh_key_auth "$server_config"; then
+        log_error "免密登录配置失败，跳过此服务器"
+        return 1
+    fi
+    echo ""
+
+    # 步骤3：分发安装包
+    log_info "步骤3：分发安装包"
+    if ! distribute_package "$server_config"; then
+        log_error "安装包分发失败，跳过此服务器"
+        return 1
+    fi
+    echo ""
+
+    # 步骤4：配置 systemd 服务
+    log_info "步骤4：配置 systemd 服务"
+    if ! install_on_remote_server "$server_config"; then
+        log_error "远程安装失败，跳过此服务器"
+        return 1
+    fi
+    echo ""
+
+    # 步骤5：验证安装结果
+    log_info "步骤5：验证安装结果"
+    if verify_installation "$server_config"; then
+        success=true
+        register_to_prometheus "$ip"
+    else
+        success=false
+    fi
+    echo ""
+
+    if [ "$success" = "true" ]; then
+        log_success "部署成功: $name ($ip)"
+        return 0
+    else
+        log_error "部署失败: $name ($ip)"
+        return 1
+    fi
+}
+
+# ============================================
+# 显示运维命令
+# ============================================
+
+show_operations_commands() {
+    local success_servers=("$@")
+
+    echo ""
+    log_info "=========================================="
+    log_info "运维命令"
+    log_info "=========================================="
+    echo ""
+
+    # 从第一台成功服务器获取用户类型示例
+    local first_server="${success_servers[0]}"
+    IFS=',' read -r name ip user port password <<< "$first_server"
+
+    # 检测用户类型
+    local is_root="false"
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 -p "$port" "${user}@${ip}" "[[ \$(id -u) -eq 0 ]]" 2>/dev/null; then
+        is_root="true"
+    fi
+
+    if [ "$is_root" = "true" ]; then
+        cat << 'EOF'
+[服务管理命令]
+  启动服务:    systemctl start node_exporter
+  停止服务:    systemctl stop node_exporter
+  重启服务:    systemctl restart node_exporter
+  查看状态:    systemctl status node_exporter
+  开机自启:    systemctl enable node_exporter
+  取消自启:    systemctl disable node_exporter
+
+[日志查看命令]
+  查看日志:    journalctl -u node_exporter -f
+  查看最近:    journalctl -u node_exporter --since "1 hour ago"
+
+[测试命令]
+  测试端点:    curl http://localhost:9100/metrics
+  查看进程:    ps aux | grep node_exporter
+  查看端口:    netstat -tlnp | grep 9100
+
+[配置文件位置]
+  服务文件:    /etc/systemd/system/node_exporter.service
+  安装目录:    $HOME/node_exporter
+EOF
+    else
+        cat << 'EOF'
+[服务管理命令]
+  启动服务:    systemctl --user start node_exporter
+  停止服务:    systemctl --user stop node_exporter
+  重启服务:    systemctl --user restart node_exporter
+  查看状态:    systemctl --user status node_exporter
+  开机自启:    systemctl --user enable node_exporter
+  取消自启:    systemctl --user disable node_exporter
+
+[日志查看命令]
+  查看日志:    systemctl --user status node_exporter
+  查看日志:    journalctl --user -u node_exporter -f
+
+[测试命令]
+  测试端点:    curl http://localhost:9100/metrics
+  查看进程:    ps aux | grep node_exporter
+  查看端口:    netstat -tlnp | grep 9100
+
+[配置文件位置]
+  服务文件:    ~/.config/systemd/user/node_exporter.service
+  安装目录:    $HOME/node_exporter
+
+[注意]
+  普通用户使用 systemd 需要设置环境变量：
+  export XDG_RUNTIME_DIR=/run/user/$(id -u)
+EOF
+    fi
+
+    echo ""
+    log_info "已部署服务器列表："
+    for server_config in "${success_servers[@]}"; do
+        IFS=',' read -r name ip user port password <<< "$server_config"
+        echo "  - $name: ssh -p $port ${user}@$ip"
+    done
+    echo ""
+}
+
+# ============================================
+# 批量部署
+# ============================================
+
+batch_deploy() {
+    local servers_config=("$@")
+
+    if [ ${#servers_config[@]} -eq 0 ]; then
+        log_error "没有需要部署的服务器"
+        return 1
+    fi
+
+    log_info "=========================================="
+    log_info "Node Exporter 批量部署"
+    log_info "=========================================="
+    log_info "配置文件: $CONFIG_FILE"
+    echo ""
+
+    # 步骤1：验证安装状态
+    local servers_to_install=()
+    mapfile -t servers_to_install < <(verify_installation_status "${servers_config[@]}")
+
+    if [ ${#servers_to_install[@]} -eq 0 ]; then
+        log_success "所有服务器已安装 Node Exporter"
+        return 0
+    fi
+
+    # 确认是否继续
+    read -p "是否继续安装? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "取消安装"
+        return 0
+    fi
+
+    # 批量部署（错误隔离）
+    local success_list=()
+    local fail_list=()
+
+    for server_config in "${servers_to_install[@]}"; do
+        if deploy_to_single_server "$server_config"; then
+            success_list+=("$server_config")
+        else
+            fail_list+=("$server_config")
+        fi
+    done
+
+    # 显示部署报告
+    echo ""
+    log_info "=========================================="
+    log_info "部署报告"
+    log_info "=========================================="
+    echo ""
+    log_success "成功: ${#success_list[@]} 台"
+    for server_config in "${success_list[@]}"; do
+        IFS=',' read -r name ip user port password <<< "$server_config"
+        echo "  ✓ $name ($ip)"
+    done
+    echo ""
+
+    if [ ${#fail_list[@]} -gt 0 ]; then
+        log_error "失败: ${#fail_list[@]} 台"
+        for server_config in "${fail_list[@]}"; do
+            IFS=',' read -r name ip user port password <<< "$server_config"
+            echo "  ✗ $name ($ip)"
+        done
+        echo ""
+    fi
+
+    # 显示运维命令
+    if [ ${#success_list[@]} -gt 0 ]; then
+        show_operations_commands "${success_list[@]}"
+    fi
+
+    return 0
+}
+
+# ============================================
+# 主函数
+# ============================================
+
+main() {
+    # 解析参数
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                show_usage
+                exit 0
+                ;;
+            *)
+                echo "未知参数: $1"
+                show_usage
+                exit 1
+                ;;
+        esac
+    done
 
     # 加载配置文件
     load_config
 
-    # 检查 Node Exporter 是否已运行
-    check_node_exporter_running
-
-    # 检查是否已安装
-    check_node_exporter_installed
-
-    # 创建目录结构
-    create_directories
-
-    # 解压安装包
-    extract_node_exporter
-
-    # 创建 systemd 服务文件
-    create_systemd_service
-
-    # 启用并启动服务
-    log_info "启用并启动 Node Exporter 服务..."
-    if [ "$(id -u)" -eq 0 ]; then
-        systemctl daemon-reload
-        systemctl enable node_exporter
-        systemctl start node_exporter
-        log_success "系统级服务已启动"
-    else
-        systemctl --user daemon-reload
-        systemctl --user enable node_exporter
-        loginctl enable-linger $(whoami) 2>/dev/null || true
-        systemctl --user start node_exporter
-        log_success "用户级服务已启动"
-    fi
-
-    # 验证服务启动
-    sleep 3
-    if pgrep -f "node_exporter" > /dev/null; then
-        log_success "Node Exporter 服务已启动"
-    else
-        log_error "Node Exporter 服务启动失败"
-        log_info "请检查服务状态："
-        if [ "$(id -u)" -eq 0 ]; then
-            log_info "  systemctl status node_exporter"
-            log_info "  journalctl -u node_exporter -n 50"
-        else
-            log_info "  systemctl --user status node_exporter"
-            log_info "  journalctl --user -u node_exporter -n 50"
-        fi
+    if [ ${#TARGET_SERVERS[@]} -eq 0 ]; then
+        log_error "未配置服务器"
+        log_info "请在 $CONFIG_FILE 中配置 TARGET_SERVERS 数组"
         exit 1
     fi
 
-    log_success "=========================================="
-    log_success "Node Exporter 本地安装完成！"
-    log_success "=========================================="
-    echo ""
-    echo "安装目录: $NODE_EXPORTER_INSTALL_DIR"
-    echo "二进制文件: $NODE_EXPORTER_BIN_DIR/node_exporter"
-    echo "服务端口: $NODE_EXPORTER_PORT"
-    echo "Metrics 地址: http://$(get_local_ip):${NODE_EXPORTER_PORT}/metrics"
-    echo ""
-    echo "服务管理命令："
-    if [ "$(id -u)" -eq 0 ]; then
-        echo "  启动: systemctl start node_exporter"
-        echo "  停止: systemctl stop node_exporter"
-        echo "  重启: systemctl restart node_exporter"
-        echo "  状态: systemctl status node_exporter"
-    else
-        echo "  启动: systemctl --user start node_exporter"
-        echo "  停止: systemctl --user stop node_exporter"
-        echo "  重启: systemctl --user restart node_exporter"
-        echo "  状态: systemctl --user status node_exporter"
-    fi
-    echo ""
+    # 执行批量部署
+    batch_deploy "${TARGET_SERVERS[@]}"
 }
 
-# ============================================
-# 主流程
-# ============================================
-
-main() {
-    # 初始化日志
-    mkdir -p "$(dirname "$LOG_FILE")"
-    touch "$LOG_FILE"
-
-    # 解析命令行参数
-    parse_arguments "$@"
-
-    # 远程部署模式
-    if [ "$REMOTE_DEPLOY_MODE" = true ]; then
-        if [ -z "$TARGET_SERVER" ]; then
-            # 交互式选择服务器
-            show_remote_deploy_menu
-        else
-            # 使用指定的服务器
-            log_info "使用指定服务器: $TARGET_SERVER"
-            # 从配置文件中的 TARGET_SERVERS 数组读取服务器信息
-            for server_config in "${TARGET_SERVERS[@]}"; do
-                IFS=',' read -r name ip user port password <<< "$server_config"
-
-                [[ "$name" =~ ^#.*$ ]] && continue
-                [ -z "$name" ] && continue
-
-                if [ "$name" = "$TARGET_SERVER" ]; then
-                    REMOTE_USER="$user"
-                    REMOTE_IP="$ip"
-                    REMOTE_PORT="${port:-22}"
-                    REMOTE_PASSWORD="$password"
-                    break
-                fi
-            done
-
-            if [ -z "$REMOTE_IP" ]; then
-                log_error "未找到服务器: $TARGET_SERVER"
-                log_error "请在 config/deploy.conf 的 TARGET_SERVERS 数组中配置此服务器"
-                exit 1
-            fi
-
-            log_info "目标服务器：$TARGET_SERVER ($REMOTE_IP)"
-            if [ -n "$REMOTE_PASSWORD" ]; then
-                log_info "认证方式：密码认证"
-            else
-                log_info "认证方式：SSH 密钥认证"
-            fi
-        fi
-
-        # 执行远程部署
-        deploy_to_remote_server
-    else
-        # 本地安装模式
-        main_local_install
-    fi
-}
-
-# ============================================
-# 脚本入口
-# ============================================
-
+# 执行主函数
 main "$@"
