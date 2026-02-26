@@ -415,8 +415,8 @@ create_systemd_service() {
 
 7. **端口冲突**：
    - 普通用户模式下，如果端口被占用，需要手动停止占用进程
-   - 无法使用 `netstat -tulpn` 查看所有进程（需要 root）
-   - 可使用 `netstat -tupn` 或 `lsof -i:<port>` 查看当前用户的端口占用
+   - 无法使用 `ss -tulpn` 查看所有进程（需要 root）
+   - 可使用 `ss -tupn` 或 `lsof -i:<port>` 查看当前用户的端口占用
 
 ## 开发注意事项
 
@@ -909,9 +909,6 @@ PerfStackSuite/
    # 允许将 TIME_WAIT sockets 快速重用（对新的 TCP 连接）
    net.ipv4.tcp_tw_reuse = 1
 
-   # 开启 TCP 连接快速回收（注意：可能引起 NAT 环境问题）
-   net.ipv4.tcp_tw_recycle = 0  # 默认关闭，NAT 环境下必须关闭
-
    # 减少 TIME_WAIT 超时时间（默认 60 秒，可调整为 30 秒）
    net.ipv4.tcp_fin_timeout = 30
    ```
@@ -967,16 +964,15 @@ PerfStackSuite/
 3. 输出当前内核参数值供用户确认
 
 **验证效果：**
-1. 执行 `netstat -an | grep TIME_WAIT | wc -l` 查看 TIME_WAIT 连接数
+1. 执行 `ss -t state TIME-WAIT | wc -l` 查看 TIME_WAIT 连接数
 2. 执行 `ss -s` 查看连接统计信息
 3. 执行 `cat /proc/sys/net/netfilter/nf_conntrack_count` 查看当前连接跟踪数
 4. 输出配置前后的对比说明
 
 **注意事项：**
-1. 警告用户 `tcp_tw_recycle` 在 NAT 环境下可能导致连接问题，默认关闭
-2. 提示某些参数需要重启网络服务或重启系统才能完全生效
-3. 说明这些优化主要针对高并发压测场景
-4. 提供恢复原始配置的方法（删除配置文件并重新加载）
+1. 提示某些参数需要重启网络服务或重启系统才能完全生效
+2. 说明这些优化主要针对高并发压测场景
+3. 提供恢复原始配置的方法（删除配置文件并重新加载）
 
 **配置持久化：**
 1. 配置文件会自动在系统重启后生效

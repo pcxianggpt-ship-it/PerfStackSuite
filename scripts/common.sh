@@ -167,7 +167,7 @@ get_local_ip() {
 # 检查端口是否被占用
 check_port() {
     local port="$1"
-    if netstat -tuln 2>/dev/null | grep -q ":${port}"; then
+    if ss -tuln 2>/dev/null | grep -q ":${port}"; then
         return 0  # 端口被占用
     else
         return 1  # 端口可用
@@ -212,7 +212,7 @@ check_environment() {
     log_info "检测到系统架构: $arch"
 
     # 检查必要命令
-    local required_commands=("tar" "systemctl" "netstat")
+    local required_commands=("tar" "systemctl" "ss")
     for cmd in "${required_commands[@]}"; do
         if ! check_command "$cmd"; then
             log_error "缺少必要命令: $cmd"
@@ -348,8 +348,17 @@ install_jmeter() {
 }
 
 install_sysctl() {
-    log_info "系统内核参数优化功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local sysctl_script="${script_dir}/install_sysctl.sh"
+
+    if [ ! -f "$sysctl_script" ]; then
+        log_error "系统内核参数优化脚本不存在: $sysctl_script"
+        return 1
+    fi
+
+    log_info "开始优化系统内核参数..."
+    bash "$sysctl_script" "$@"
+    return $?
 }
 
 config_ssh() {
@@ -398,4 +407,18 @@ uninstall_jdk() {
 uninstall_jmeter() {
     log_info "JMeter 卸载功能开发中..."
     return 1
+}
+
+uninstall_sysctl() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local sysctl_script="${script_dir}/uninstall_sysctl.sh"
+
+    if [ ! -f "$sysctl_script" ]; then
+        log_error "系统内核参数优化卸载脚本不存在: $sysctl_script"
+        return 1
+    fi
+
+    log_info "开始卸载系统内核参数优化配置..."
+    bash "$sysctl_script" "$@"
+    return $?
 }

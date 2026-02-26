@@ -215,13 +215,13 @@ sudo bash scripts/uninstall_prometheus.sh
 sudo lsof -i :9090
 
 # 或
-sudo netstat -tulpn | grep 9090
+sudo ss -tulpn | grep 9090
 
 # 杀死进程
 sudo kill -9 <PID>
 
 # 验证端口已释放
-sudo netstat -tulpn | grep 9090
+sudo ss -tulpn | grep 9090
 ```
 
 ### 问题 3: 目录无法删除

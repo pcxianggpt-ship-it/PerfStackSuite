@@ -471,7 +471,7 @@ show_operations_commands() {
 [测试命令]
   测试端点:    curl http://localhost:9100/metrics
   查看进程:    ps aux | grep node_exporter
-  查看端口:    netstat -tlnp | grep 9100
+  查看端口:    ss -tlnp | grep 9100
 
 [配置文件位置]
   服务文件:    /etc/systemd/system/node_exporter.service
@@ -494,7 +494,7 @@ EOF
 [测试命令]
   测试端点:    curl http://localhost:9100/metrics
   查看进程:    ps aux | grep node_exporter
-  查看端口:    netstat -tlnp | grep 9100
+  查看端口:    ss -tlnp | grep 9100
 
 [配置文件位置]
   服务文件:    ~/.config/systemd/user/node_exporter.service
