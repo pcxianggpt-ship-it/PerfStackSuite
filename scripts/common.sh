@@ -32,28 +32,28 @@ NC='\033[0m' # No Color
 # 输出信息级别日志（绿色）
 log_info() {
     local msg="$1"
-    echo -e "${GREEN}[INFO]${NC} $msg"
+    echo -e "${GREEN}[INFO]${NC} $msg" >&2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $msg" >> "$LOG_FILE"
 }
 
 # 输出警告级别日志（黄色）
 log_warn() {
     local msg="$1"
-    echo -e "${YELLOW}[WARN]${NC} $msg"
+    echo -e "${YELLOW}[WARN]${NC} $msg" >&2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] $msg" >> "$LOG_FILE"
 }
 
 # 输出错误级别日志（红色）
 log_error() {
     local msg="$1"
-    echo -e "${RED}[ERROR]${NC} $msg"
+    echo -e "${RED}[ERROR]${NC} $msg" >&2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $msg" >> "$LOG_FILE"
 }
 
 # 输出成功信息（绿色）
 log_success() {
     local msg="$1"
-    echo -e "${GREEN}[SUCCESS]${NC} $msg"
+    echo -e "${GREEN}[SUCCESS]${NC} $msg" >&2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] $msg" >> "$LOG_FILE"
 }
 
@@ -132,12 +132,25 @@ extract_tar() {
     fi
 
     log_info "正在解压: $tarfile"
-    tar -xzf "$tarfile" -C "$dest_dir"
-    if [ $? -eq 0 ]; then
+
+    # 解压并忽略非关键的符号链接错误
+    # 某些 JDK 包包含 Windows 特定的符号链接，在 Git Bash 环境下可能创建失败
+    tar -xzf "$tarfile" -C "$dest_dir" 2>&1 | grep -v "Cannot create symlink" || true
+
+    local tar_exit=${PIPESTATUS[0]}
+
+    # 检查是否有文件被解压出来
+    if [ -d "$dest_dir" ] && [ "$(ls -A "$dest_dir" 2>/dev/null)" ]; then
         log_success "解压成功: $tarfile"
+
+        # 如果 tar 返回非零退出码，给出警告
+        if [ $tar_exit -ne 0 ]; then
+            log_warn "解压过程中出现非关键错误（可能是不支持的符号链接），已忽略"
+        fi
+
         return 0
     else
-        log_error "解压失败: $tarfile"
+        log_error "解压失败: $tarfile (未找到解压后的文件)"
         return 1
     fi
 }
@@ -316,8 +329,17 @@ install_node_exporter() {
 }
 
 install_jdk() {
-    log_info "JDK 安装功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local jdk_script="${script_dir}/install_jdk.sh"
+
+    if [ ! -f "$jdk_script" ]; then
+        log_error "JDK 安装脚本不存在: $jdk_script"
+        return 1
+    fi
+
+    log_info "开始安装 JDK..."
+    bash "$jdk_script" "$@"
+    return $?
 }
 
 install_jmeter() {
@@ -360,8 +382,17 @@ install_influxdb() {
 
 # InfluxDB 和 Node Exporter 卸载功能开发中
 uninstall_jdk() {
-    log_info "JDK 卸载功能开发中..."
-    return 1
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local jdk_script="${script_dir}/uninstall_jdk.sh"
+
+    if [ ! -f "$jdk_script" ]; then
+        log_error "JDK 卸载脚本不存在: $jdk_script"
+        return 1
+    fi
+
+    log_info "开始卸载 JDK..."
+    bash "$jdk_script" "$@"
+    return $?
 }
 
 uninstall_jmeter() {

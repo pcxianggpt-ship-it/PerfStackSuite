@@ -9,7 +9,15 @@
       "Bash(dos2unix:*)",
       "Bash(cat:*)",
       "Bash(ls:*)",
-      "Bash(tar:*)"
+      "Bash(tar:*)",
+      "Bash(for:*)",
+      "Bash(do sed:*)",
+      "Bash(echo:*)",
+      "Bash(done:*)",
+      "Read(//c/Users/amarsoft/java//**)",
+      "Bash(test:*)",
+      "Bash(/c/Users/amarsoft/java/current/bin/java:*)",
+      "Read(//c/Users/amarsoft/**)"
     ],
     "deny": [],
     "ask": []
