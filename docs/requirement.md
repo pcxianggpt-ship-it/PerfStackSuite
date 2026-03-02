@@ -986,55 +986,45 @@ PerfStackSuite/
 
 **操作步骤：**
 
+1. 检查 root 权限
+   - 非 root 用户无法配置 SSH 服务和安装系统字体
+
 **SSH 服务配置：**
-1. 检查 SSH 服务状态：
-   - 检测操作系统类型
-   - CentOS 检查 sshd 服务，Ubuntu 检查 ssh 服务
-2. 如果 SSH 服务未安装：
-   - CentOS：yum install -y openssh-server
-   - Ubuntu：apt-get install -y openssh-server
-3. 备份 SSH 配置文件 `/etc/ssh/sshd_config` 到 `/etc/ssh/sshd_config.bak`
-4. 编辑 SSH 配置文件：
+2. 备份 SSH 配置文件 `/etc/ssh/sshd_config` 到 `/etc/ssh/sshd_config.bak`
+3. 编辑 SSH 配置文件：
    - 启用 X11Forwarding yes
    - 启用 X11UseLocalhost yes
    - 设置 MaxSessions 10（允许更多会话）
    - 配置允许的认证方式（PubkeyAuthentication yes）
    - 可选：禁用密码登录（PasswordAuthentication no）
-5. 安装 X11 依赖库：
+4. 安装 X11 依赖库：
    - CentOS：yum install -y xauth xorg-x11-fonts-* libX11 libXext libXtst
    - Ubuntu：apt-get install -y xauth x11-apps libx11-6 libxext6 libxtst6
-
-**中文字体安装（解决 JMeter GUI 乱码）：**
-6. 检测系统已安装字体：执行 `fc-list :lang=zh`
-7. 安装中文字体包：
-   - CentOS/麒麟 V10：
-     - yum install -y fonts-chinese
-     - yum install -y fonts-wqy-zenhei fonts-wqy-microhei
-     - 可选：yum install -y fonts-arphic-uming fonts-arphic-ukai
-   - Ubuntu：
-     - apt-get install -y fonts-wqy-zenhei fonts-wqy-microhei
-     - apt-get install -y fonts-noto-cjk
-     - 可选：apt-get install -y fonts-arphic-uming fonts-arphic-ukai
-8. 安装自定义字体文件（如 soft/fonts/ 目录存在）：
-   - 创建字体缓存目录：
-     - CentOS：`/usr/share/fonts/chinese`
-     - Ubuntu：`/usr/share/fonts/truetype/chinese`
-   - 复制字体文件到字体目录
-   - 设置字体权限：`chmod 644`
-   - 更新字体缓存：`fc-cache -fv`
-   - 验证字体安装：`fc-list :lang=zh`
-9. 配置 JMeter 字体参数：
-   - 编辑 JMeter 启动脚本：`/opt/jmeter/current/bin/jmeter`
-   - 添加 JVM 参数：`-Dfile.encoding=UTF-8`
-   - 可选：指定默认字体：`-Dswing.defaultfont=SansSerif`
-10. 防火墙配置：
+5. 防火墙配置：
    - 开放 SSH 端口（默认 22）
    - CentOS：firewall-cmd --permanent --add-service=ssh
    - Ubuntu：ufw allow ssh
-11. 重启 SSH 服务使配置生效：
+6. 重启 SSH 服务使配置生效：
    - systemctl restart sshd 或 systemctl restart ssh
-12. 显示 X11 Forwarding 配置状态：
+7. 显示 X11 Forwarding 配置状态：
    - 执行 grep 查看配置是否生效
+
+**中文字体安装（解决 JMeter GUI 乱码）：**
+8. 检测系统已安装字体：执行 `fc-list :lang=zh`
+9. 安装自定义字体文件（从 soft/fonts/ 目录）：
+   - 检查 `soft/fonts/` 目录是否存在且包含字体文件
+   - 创建字体缓存目录：
+     - CentOS：`/usr/share/fonts/chinese`
+     - Ubuntu：`/usr/share/fonts/truetype/chinese`
+   - 复制字体文件到字体目录（支持 .ttf, .ttc, .otf 格式）
+   - 设置字体权限：`chmod 644`
+   - 更新字体缓存：`fc-cache -fv`
+   - 验证字体安装：`fc-list :lang=zh`
+   - **要求**：字体文件必须预先放置在 `soft/fonts/` 目录
+10. 配置 JMeter 字体参数：
+    - 编辑 JMeter 启动脚本：`/opt/jmeter/current/bin/jmeter`
+    - 添加 JVM 参数：`-Dfile.encoding=UTF-8`
+    - 可选：指定默认字体：`-Dswing.defaultfont=SansSerif`
 
 **SSH 密钥配置（可选）：**
 1. 检查是否已存在 SSH 密钥对

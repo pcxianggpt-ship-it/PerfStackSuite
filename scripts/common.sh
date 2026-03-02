@@ -366,11 +366,6 @@ config_ssh() {
     return 1
 }
 
-install_chinese_fonts() {
-    log_info "中文字体安装功能开发中..."
-    return 1
-}
-
 # ============================================
 # 卸载函数（后续实现）
 # ============================================
@@ -420,5 +415,69 @@ uninstall_sysctl() {
 
     log_info "开始卸载系统内核参数优化配置..."
     bash "$sysctl_script" "$@"
+    return $?
+}
+
+# ============================================
+# 字体管理函数
+# ============================================
+
+# 检查字体是否已安装
+# 参数: $1 - 字体名称（支持模糊匹配）
+check_font() {
+    local font_name="$1"
+
+    if [ -z "$font_name" ]; then
+        log_error "请提供字体名称"
+        return 1
+    fi
+
+    if ! command -v fc-list >/dev/null 2>&1; then
+        log_warn "fc-list 命令不可用"
+        return 2
+    fi
+
+    if fc-list :lang=zh 2>/dev/null | grep -i "$font_name" >/dev/null; then
+        log_info "字体 '$font_name' 已安装"
+        return 0
+    else
+        log_info "字体 '$font_name' 未安装"
+        return 1
+    fi
+}
+
+# 安装中文字体（调用 config_ssh.sh）
+# 参数: 与 config_ssh.sh 相同的参数
+install_chinese_fonts() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local ssh_script="${script_dir}/config_ssh.sh"
+
+    if [ ! -f "$ssh_script" ]; then
+        log_error "SSH 配置脚本不存在: $ssh_script"
+        log_error "无法安装字体"
+        return 1
+    fi
+
+    log_info "开始安装中文字体..."
+    # 调用 config_ssh.sh 中的字体安装功能
+    bash "$ssh_script" --font "$@"
+    return $?
+}
+
+# ============================================
+# SSH 配置函数
+# ============================================
+
+config_ssh() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local ssh_script="${script_dir}/config_ssh.sh"
+
+    if [ ! -f "$ssh_script" ]; then
+        log_error "SSH 配置脚本不存在: $ssh_script"
+        return 1
+    fi
+
+    log_info "开始配置 SSH 服务和字体..."
+    bash "$ssh_script" "$@"
     return $?
 }
