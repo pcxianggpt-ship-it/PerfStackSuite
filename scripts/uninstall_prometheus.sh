@@ -41,7 +41,8 @@ fi
 show_uninstall_info() {
     echo ""
     echo "============================================"
-    echo "    Prometheus 卸载程序"
+    echo "    PerfStackSuite 卸载程序"
+    echo "    组件: Prometheus"
     echo "============================================"
     echo ""
     echo "将卸载以下内容："
@@ -317,6 +318,9 @@ main() {
     # 初始化日志
     mkdir -p "$(dirname "$LOG_FILE")"
     touch "$LOG_FILE"
+
+    # 环境检查
+    check_environment
 
     # 加载配置
     load_config

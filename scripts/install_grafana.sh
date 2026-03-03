@@ -276,6 +276,39 @@ EOF
 }
 
 # ============================================
+# 生成 InfluxDB 数据源 Provisioning 配置
+# ============================================
+
+generate_influxdb_datasource_provisioning() {
+    log_info "生成 InfluxDB 数据源 Provisioning 配置..."
+
+    local influxdb_datasource_file="${GRAFANA_PROVISIONING_DIR}/datasources/influxdb.yml"
+
+    cat > "$influxdb_datasource_file" <<EOF
+# Grafana InfluxDB 数据源自动配置
+# 自动生成时间: $(date)
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://localhost:8086
+    database: jmeter
+    user: jmeter
+    jsonData:
+      httpMode: POST
+      timeInterval: "10s"
+    secureJsonData:
+      password: jmeter123
+    isDefault: false
+    editable: true
+EOF
+
+    log_success "InfluxDB 数据源配置完成: $influxdb_datasource_file"
+}
+
+# ============================================
 # 创建默认仪表板配置
 # ============================================
 
@@ -478,6 +511,65 @@ providers:
 EOF
 
     log_success "仪表板 Provisioning 配置完成: $dashboard_config"
+}
+
+# ============================================
+# 导入仪表盘文件
+# ============================================
+
+import_dashboards() {
+    log_info "导入仪表盘文件..."
+
+    local dashboard_source="${SCRIPT_DIR}/../soft/dashboard"
+    local dashboard_dest="${GRAFANA_PROVISIONING_DIR}/dashboards"
+
+    if [ ! -d "$dashboard_source" ]; then
+        log_warn "未找到仪表盘目录: $dashboard_source"
+        return 0
+    fi
+
+    # 检查目录下是否有 JSON 文件
+    local json_files=$(find "$dashboard_source" -maxdepth 1 -name "*.json" 2>/dev/null)
+    if [ -z "$json_files" ]; then
+        log_warn "仪表盘目录中没有 JSON 文件"
+        return 0
+    fi
+
+    # 复制所有 JSON 仪表盘文件到 provisioning 目录
+    for file in $json_files; do
+        local filename=$(basename "$file")
+        log_info "导入仪表盘: $filename"
+
+        # 先复制原始文件
+        cp "$file" "$dashboard_dest/$filename"
+
+        # 处理数据源变量（Grafana 8+ 使用 UUID 匹配）
+        # Node Exporter Dashboard 使用 __inputs 和 "${DS_TEST-PROMETHEUS}" 变量
+        if echo "$filename" | grep -qi "node-exporter"; then
+            log_info "  - 检测到 Node Exporter 仪表盘"
+            log_info "  - Dashboard 使用 __inputs 和 UID 变量"
+
+            # 方式 1：精确替换 UID 字段（保留引号）
+            # 这样可以确保只替换 datasource.uid 字段，不影响其他地方
+            sed -i 's/"uid": "\${DS_TEST-PROMETHEUS}"/"uid": "Prometheus"/g' "$dashboard_dest/$filename"
+            log_info "  - 替换数据源 UID: \${DS_TEST-PROMETHEUS} -> Prometheus"
+            log_info "  - 匹配方式：通过数据源名称（Grafana Provisioning 自动处理）"
+        fi
+
+        # JMeter Dashboard 使用简单变量 $data_source
+        if echo "$filename" | grep -qi "jmeter"; then
+            log_info "  - 检测到 JMeter 仪表盘"
+            log_info "  - Dashboard 使用 \$data_source 变量"
+
+            # 精确替换变量（确保只匹配完整的变量名）
+            sed -i 's/"datasource": "\$data_source"/"datasource": "InfluxDB"/g' "$dashboard_dest/$filename"
+            log_info "  - 替换数据源变量: \$data_source -> InfluxDB"
+        fi
+    done
+
+    # 统计导入的仪表盘数量
+    local count=$(ls -1 "$dashboard_dest"/*.json 2>/dev/null | wc -l)
+    log_success "已导入 $count 个仪表盘文件"
 }
 
 # ============================================
@@ -869,19 +961,13 @@ verify_installation() {
 # ============================================
 
 configure_prometheus_datasource() {
-    log_info "检查 Prometheus 数据源配置..."
+    log_info "检查数据源配置..."
 
     local grafana_url="http://localhost:${GRAFANA_PORT}"
 
     # 等待 Grafana 完全启动
     log_info "等待 Grafana 完全启动..."
     sleep 5
-
-    # 检查 Prometheus 是否运行
-    if ! pgrep -f "prometheus" > /dev/null; then
-        log_warn "Prometheus 未运行，跳过数据源验证"
-        return
-    fi
 
     # 测试数据源连接（通过 provisioning 已经配置）
     if command -v curl >/dev/null 2>&1; then
@@ -890,6 +976,20 @@ configure_prometheus_datasource() {
 
         if echo "$health_check" | grep -q "database"; then
             log_success "Grafana API 可访问，数据源已通过 Provisioning 配置"
+
+            # 检查 Prometheus 是否运行
+            if pgrep -f "prometheus" > /dev/null; then
+                log_info "Prometheus 服务运行正常"
+            else
+                log_warn "Prometheus 服务未运行，Node Exporter 仪表盘可能无法显示数据"
+            fi
+
+            # 检查 InfluxDB 是否运行
+            if pgrep -f "influxd" > /dev/null; then
+                log_info "InfluxDB 服务运行正常"
+            else
+                log_warn "InfluxDB 服务未运行，JMeter 仪表盘可能无法显示数据"
+            fi
         else
             log_warn "无法验证数据源配置，请手动检查"
         fi
@@ -931,8 +1031,23 @@ show_install_info() {
     echo ""
 
     echo "已配置数据源："
-    echo "  - Prometheus (http://localhost:9090)"
+    echo "  - Prometheus (http://localhost:9090) [默认]"
+    echo "  - InfluxDB (http://localhost:8086)"
     echo ""
+
+    # 显示导入的仪表盘
+    local dashboard_count=$(ls -1 "${GRAFANA_PROVISIONING_DIR}/dashboards"/*.json 2>/dev/null | wc -l)
+    if [ "$dashboard_count" -gt 2 ]; then  # 减去 dashboards.yml 和 home.json
+        echo "已导入仪表盘："
+        ls -1 "${GRAFANA_PROVISIONING_DIR}/dashboards"/*.json 2>/dev/null | while read -r file; do
+            local filename=$(basename "$file")
+            # 排除 dashboards.yml 和 home.json
+            if [ "$filename" != "dashboards.yml" ] && [ "$filename" != "home.json" ]; then
+                echo "  - ${filename}"
+            fi
+        done
+        echo ""
+    fi
 
     echo "服务管理："
     if [ "$IS_ROOT_INSTALL" = true ]; then
@@ -1003,11 +1118,17 @@ main() {
     # 生成数据源 provisioning 配置
     generate_datasource_provisioning
 
+    # 生成 InfluxDB 数据源 provisioning 配置
+    generate_influxdb_datasource_provisioning
+
     # 创建默认仪表板
     create_default_dashboard
 
     # 创建仪表板 provisioning 配置
     create_dashboard_provisioning
+
+    # 导入仪表盘文件
+    import_dashboards
 
     # 创建 systemd 服务
     create_systemd_service

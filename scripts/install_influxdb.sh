@@ -226,8 +226,8 @@ generate_config() {
   # 监听地址和端口
   bind-address = ":${INFLUXDB_PORT}"
 
-  # 启用认证（强烈推荐）
-  auth-enabled = true
+  # 启用认证
+  auth-enabled = false
 
   # 启用 HTTP 日志
   log-enabled = true

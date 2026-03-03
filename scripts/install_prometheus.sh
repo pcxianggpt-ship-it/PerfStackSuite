@@ -12,6 +12,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 加载公共函数库
 source "${SCRIPT_DIR}/common.sh"
 
+# 加载部署配置文件
+CONFIG_DIR="${SCRIPT_DIR}/../config"
+if [ -f "$CONFIG_DIR/deploy.conf" ]; then
+    source "$CONFIG_DIR/deploy.conf"
+else
+    log_warn "未找到部署配置文件: $CONFIG_DIR/deploy.conf，使用默认配置"
+fi
+
 # ============================================
 # 常量定义
 # ============================================
@@ -121,6 +129,79 @@ generate_config() {
     # 备份原有配置（如果存在）
     backup_file "$config_file"
 
+    # 生成动态配置内容
+    local scrape_config_content=""
+
+
+    # 添加远程服务器监控（从 TARGET_SERVERS）
+    # TARGET_SERVERS 格式: "server_name,ip_address,user,port,password"
+    if [ -n "$TARGET_SERVERS" ]; then
+        log_info "配置远程服务器监控..."
+
+        # 收集所有目标服务器 IP 用于单个 scrape job
+        local target_ips=""
+
+        local temp_IFS=$IFS
+        IFS=$'\n'
+
+        # 将 TARGET_SERVERS 转换为可迭代的格式
+        # 注意：TARGET_SERVERS 是一个 bash 数组声明，需要特殊处理
+        local servers_list=""
+        for server in "${TARGET_SERVERS[@]}"; do
+            # 跳过空行和注释
+            [[ "$server" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$server" ]] && continue
+
+            servers_list="$servers_list $server"
+        done
+
+        IFS=' '
+        for entry in $servers_list; do
+            # 移除引号
+            entry="${entry#\"}"
+            entry="${entry%\"}"
+
+            # 解析格式: server_name,ip_address,user,port,password
+            local server_name=$(echo "$entry" | cut -d, -f1)
+            local ip=$(echo "$entry" | cut -d, -f2)
+            local user=$(echo "$entry" | cut -d, -f3)
+            local ssh_port=$(echo "$entry" | cut -d, -f4)
+
+            if [ -n "$ip" ]; then
+                log_info "  添加服务器: $server_name ($ip)"
+
+                # 收集 IP 地址，使用 Node Exporter 端口
+                if [ -z "$target_ips" ]; then
+                    target_ips="'${ip}:${NODE_EXPORTER_PORT}'"
+                else
+                    target_ips="${target_ips}, '${ip}:${NODE_EXPORTER_PORT}'"
+                fi
+            fi
+        done
+
+        IFS=$temp_IFS
+
+        # 生成单个 scrape job，包含所有目标服务器
+        if [ -n "$target_ips" ]; then
+            scrape_config_content="${scrape_config_content}
+  - job_name: 'node_exporter'
+    static_configs:
+    - targets: [${target_ips}]
+"
+        fi
+    fi
+
+    # 如果没有配置远程服务器，使用默认 localhost:9090
+    if [ -z "$scrape_config_content" ]; then
+        log_info "使用默认监控目标: localhost:9090"
+        scrape_config_content="  # 默认监控目标
+  - job_name: 'prometheus'
+    static_configs:
+    - targets: ['localhost:9090']
+"
+    fi
+
+    # 生成完整的配置文件
     cat > "$config_file" <<EOF
 # Prometheus 配置文件
 # 自动生成时间: $(date)
@@ -145,9 +226,7 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-
-  # Node Exporter（自动发现）
-  # 安装 Node Exporter 后会自动添加
+${scrape_config_content}
 EOF
 
     log_success "配置文件生成完成: $config_file"
@@ -437,6 +516,10 @@ configure_firewall() {
 # ============================================
 
 start_service() {
+    # 在启动服务前，根据配置重新生成 prometheus.yml
+    log_info "根据部署配置更新 Prometheus 配置..."
+    generate_config
+
     if [ "$IS_ROOT_INSTALL" = true ]; then
         start_system_service
     else

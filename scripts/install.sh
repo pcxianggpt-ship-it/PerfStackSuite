@@ -31,8 +31,8 @@ show_welcome() {
 
 show_menu() {
     echo "请选择操作:"
-    echo "  1 - 全量安装（Prometheus + Grafana + InfluxDB + Node Exporter + JDK + JMeter）"
-    echo "  2 - 仅安装监控系统"
+    echo "  1 - 全量安装（Node Exporter + Prometheus + InfluxDB + Grafana + JDK + JMeter）"
+    echo "  2 - 仅安装监控系统（自动按正确顺序安装）"
     echo "  3 - 仅安装 JDK + JMeter"
     echo "  4 - 配置 SSH + X11"
     echo "  5 - 优化系统内核参数（TCP TIME_WAIT 处理）"
@@ -121,8 +121,20 @@ show_help() {
 install_all() {
     log_info "开始全量安装..."
 
-    # 安装监控系统
+    # 安装监控系统（按照正确顺序：Node Exporter → Prometheus → InfluxDB → Grafana）
     log_info "步骤 1/2: 安装监控系统..."
+
+    log_info "1/4 安装 Node Exporter（数据采集）..."
+    if ! install_node_exporter; then
+        log_error "Node Exporter 安装失败"
+        read -p "是否继续安装其他组件？(y/N): " continue
+        if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
+            log_info "取消安装"
+            exit 1
+        fi
+    fi
+
+    log_info "2/4 安装 Prometheus（数据收集）..."
     if ! install_prometheus; then
         log_error "Prometheus 安装失败"
         read -p "是否继续安装其他组件？(y/N): " continue
@@ -132,15 +144,7 @@ install_all() {
         fi
     fi
 
-    if ! install_grafana; then
-        log_error "Grafana 安装失败"
-        read -p "是否继续安装其他组件？(y/N): " continue
-        if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
-            log_info "取消安装"
-            exit 1
-        fi
-    fi
-
+    log_info "3/4 安装 InfluxDB（压测数据存储）..."
     if ! install_influxdb; then
         log_error "InfluxDB 安装失败"
         read -p "是否继续安装其他组件？(y/N): " continue
@@ -150,8 +154,9 @@ install_all() {
         fi
     fi
 
-    if ! install_node_exporter; then
-        log_error "Node Exporter 安装失败"
+    log_info "4/4 安装 Grafana（数据可视化）..."
+    if ! install_grafana; then
+        log_error "Grafana 安装失败"
         read -p "是否继续安装其他组件？(y/N): " continue
         if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
             log_info "取消安装"
@@ -185,6 +190,17 @@ install_all() {
 install_monitoring() {
     log_info "开始安装监控系统..."
 
+    log_info "1/4 安装 Node Exporter（数据采集）..."
+    if ! install_node_exporter; then
+        log_error "Node Exporter 安装失败"
+        read -p "是否继续安装其他监控组件？(y/N): " continue
+        if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
+            log_info "取消安装"
+            exit 1
+        fi
+    fi
+
+    log_info "2/4 安装 Prometheus（数据收集）..."
     if ! install_prometheus; then
         log_error "Prometheus 安装失败"
         read -p "是否继续安装其他监控组件？(y/N): " continue
@@ -194,8 +210,9 @@ install_monitoring() {
         fi
     fi
 
-    if ! install_grafana; then
-        log_error "Grafana 安装失败"
+    log_info "3/4 安装 InfluxDB（压测数据存储）..."
+    if ! install_influxdb; then
+        log_error "InfluxDB 安装失败"
         read -p "是否继续安装其他监控组件？(y/N): " continue
         if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
             log_info "取消安装"
@@ -203,17 +220,9 @@ install_monitoring() {
         fi
     fi
 
-    if ! install_influxdb; then
-        log_error "InfluxDB 安装失败"
-        read -p "是否继续安装 Node Exporter？(y/N): " continue
-        if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
-            log_info "取消安装"
-            exit 1
-        fi
-    fi
-
-    if ! install_node_exporter; then
-        log_error "Node Exporter 安装失败"
+    log_info "4/4 安装 Grafana（数据可视化）..."
+    if ! install_grafana; then
+        log_error "Grafana 安装失败"
     fi
 
     log_success "监控系统安装完成！"
@@ -247,13 +256,16 @@ install_jmeter_suite() {
 
 install_custom() {
     log_info "自定义安装模式"
+    echo ""
+    echo "💡 推荐安装顺序：4 → 1 → 3 → 2 （Node Exporter → Prometheus → InfluxDB → Grafana）"
+    echo ""
     echo "请选择要安装的组件（多选用空格分隔）:"
-    echo "  1 - Prometheus"
-    echo "  2 - Grafana"
-    echo "  3 - InfluxDB"
-    echo "  4 - Node Exporter"
-    echo "  5 - JDK"
-    echo "  6 - JMeter"
+    echo "  1 - Prometheus（数据收集）"
+    echo "  2 - Grafana（数据可视化，需先安装 Prometheus 和 InfluxDB）"
+    echo "  3 - InfluxDB（压测数据存储）"
+    echo "  4 - Node Exporter（数据采集）"
+    echo "  5 - JDK（JMeter 依赖）"
+    echo "  6 - JMeter（压测工具，需先安装 JDK）"
     echo "  7 - 系统内核优化"
     echo "  8 - SSH 配置"
     echo ""
@@ -326,6 +338,8 @@ install_custom() {
 uninstall_components() {
     log_info "卸载组件模式"
     echo ""
+    echo "💡 推荐卸载顺序：2 → 3 → 1 → 4 （Grafana → InfluxDB → Prometheus → Node Exporter）"
+    echo ""
     echo "请选择要卸载的组件（多选用空格分隔）:"
     echo "  1 - Prometheus"
     echo "  2 - Grafana"
@@ -333,12 +347,13 @@ uninstall_components() {
     echo "  4 - Node Exporter"
     echo "  5 - JDK"
     echo "  6 - JMeter"
-    echo "  all - 全部卸载"
+    echo "  all - 全部卸载（按推荐顺序自动卸载）"
     echo ""
     read -p "请输入组件编号: " components
 
     if [ "$components" = "all" ]; then
-        components="1 2 3 4 5 6"
+        # 按逆序卸载：Grafana → InfluxDB → Prometheus → Node Exporter
+        components="2 3 1 4 5 6"
     fi
 
     local uninstalled_components=()
